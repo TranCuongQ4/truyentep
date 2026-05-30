@@ -13,15 +13,11 @@
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-
 </head>
 
 <body>
 
 <div class="app-frame">
-
-    <!-- HEADER -->
 
     <div class="header-card">
 
@@ -39,8 +35,6 @@
 
     </div>
 
-    <!-- STATUS -->
-
     <div class="status-card">
 
         <div class="status-label">
@@ -53,56 +47,52 @@
 
     </div>
 
-    <!-- SEND -->
-
     <div class="section-card">
 
         <div class="section-title">
             📤 Gửi File
         </div>
 
-        <label for="fileInput" class="btn3d primary-btn">
-            Chọn File
-        </label>
+        <div class="input-group">
 
-        <input
-            type="file"
-            id="fileInput"
-            hidden
-        >
+            <label for="fileInput" class="file-label">
+                Chọn File Cần Gửi
+            </label>
 
-        <div id="fileName" class="file-name">
-            Chưa chọn file
-        </div>
+            <input
+                type="file"
+                id="fileInput"
+                class="file-input">
 
-        <div class="room-box">
-
-            <div class="room-label">
-                Mã Phòng
+            <div
+                id="fileName"
+                class="file-name">
+                Chưa có file nào được chọn
             </div>
-
-            <div id="roomCode" class="room-code">
-                ------
-            </div>
-
-        </div>
-
-        <div id="qrWrapper" class="qr-wrapper">
-
-            <canvas id="qrCanvas"></canvas>
 
         </div>
 
         <button
             id="createRoomBtn"
-            class="btn3d success-btn"
-        >
-            Tạo Phòng
+            class="btn btn-primary">
+            Tạo Phòng Gửi
         </button>
 
-    </div>
+        <div class="room-info">
 
-    <!-- RECEIVE -->
+            <div class="room-label">
+                Mã Phòng Của Bạn:
+            </div>
+
+            <div
+                id="roomCode"
+                class="room-code">
+                ------
+            </div>
+
+        </div>
+
+    </div>
 
     <div class="section-card">
 
@@ -110,44 +100,48 @@
             📥 Nhận File
         </div>
 
-        <input
-            type="text"
-            id="roomInput"
-            maxlength="6"
-            placeholder="Nhập mã phòng"
-            class="room-input"
-        >
+        <div class="input-group">
+
+            <input
+                type="text"
+                id="roomInput"
+                placeholder="Nhập mã phòng 6 ký tự..."
+                class="room-input"
+                maxlength="6">
+
+        </div>
 
         <button
             id="joinRoomBtn"
-            class="btn3d blue-btn"
-        >
-            Kết Nối
+            class="btn btn-secondary">
+            Kết Nối Nhận File
         </button>
 
     </div>
 
-    <!-- TRANSFER -->
+    <div class="progress-card">
 
-    <div class="transfer-card">
+        <div class="progress-header">
 
-        <div class="transfer-title">
-            Tiến Trình Truyền
-        </div>
-
-        <div class="progress-wrap">
+            <div class="progress-label">
+                Tiến Trình Truyền Tải
+            </div>
 
             <div
-                id="progressBar"
-                class="progress-bar">
+                id="progressPercent"
+                class="progress-percent">
+                0%
             </div>
 
         </div>
 
-        <div
-            id="progressPercent"
-            class="progress-percent">
-            0%
+        <div class="progress-bar-bg">
+
+            <div
+                id="progressBar"
+                class="progress-bar-fill">
+            </div>
+
         </div>
 
         <div class="stats-grid">
@@ -155,7 +149,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Đã Truyền
+                    Dung Lượng
                 </div>
 
                 <div
@@ -216,8 +210,6 @@
 
     </div>
 
-    <!-- LOG -->
-
     <div class="log-card">
 
         <div class="log-title">
@@ -233,8 +225,6 @@
     </div>
 
 </div>
-
-<!-- TOAST -->
 
 <div
     id="toast"

@@ -78,9 +78,6 @@ document.getElementById("logBox");
 const toast =
 document.getElementById("toast");
 
-const qrCanvas =
-document.getElementById("qrCanvas");
-
 
 // =====================================================
 // GLOBAL
@@ -108,7 +105,7 @@ let transferStartTime = 0;
 
 
 // =====================================================
-// ICE SERVERS 
+// ICE SERVERS (Cấu hình STUN của Google tối ưu kết nối Internet)
 // =====================================================
 
 const rtcConfig = {
@@ -227,47 +224,6 @@ fileInput.addEventListener(
 
 });
 
-// =====================================================
-// QR CODE (Sửa dứt điểm lỗi CORS bằng phương pháp nạp Ảnh qua API Google)
-// =====================================================
-
-function createQRCode(code){
-
-    return new Promise((resolve, reject) => {
-        try {
-            const ctx = qrCanvas.getContext("2d");
-            const img = new Image();
-            
-            // Thiết lập kích thước Canvas đồng bộ với CSS
-            qrCanvas.width = 180;
-            qrCanvas.height = 180;
-
-            img.crossOrigin = "anonymous"; 
-            
-            // Sử dụng API tạo mã QR tĩnh, an toàn, không phụ thuộc thư viện JS ngoại vi
-            img.src = `https://chart.googleapis.com/chart?chs=180x180&cht=qr&chl=${encodeURIComponent(code)}&choe=UTF-8`;
-
-            img.onload = () => {
-                ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
-                ctx.drawImage(img, 0, 0, 180, 180);
-                addLog("Đã tạo ảnh QR thành công.");
-                resolve();
-            };
-
-            img.onerror = (e) => {
-                console.error(e);
-                addLog("Lỗi tải ảnh QR từ máy chủ, bỏ qua.");
-                reject(e);
-            };
-
-        } catch (err) {
-            console.error(err);
-            addLog("Không thể khởi tạo vùng vẽ QR Code.");
-            reject(err);
-        }
-    });
-}
-
 
 // =====================================================
 // CREATE ROOM
@@ -296,9 +252,6 @@ async () => {
 
     roomCode.textContent =
     roomId;
-
-    // Chạy vẽ QR Code song song không làm treo luồng logic chính
-    createQRCode(roomId).catch(e => console.log(e));
 
     setStatus(
     "Đang tạo phòng..."
