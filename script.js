@@ -103,12 +103,12 @@ let expectedFileName = "";
 
 let transferStartTime = 0;
 
-// Thêm biến cờ kiểm soát để tránh lắng nghe trùng lặp Answer từ Firebase
+// Biến cờ kiểm soát hủy lắng nghe trùng lặp từ Firebase
 let unsubscribeAnswer = null; 
 
 
 // =====================================================
-// ICE SERVERS (Cấu hình STUN của Google tối ưu kết nối Internet)
+// ICE SERVERS (Cấu hình STUN của Google tốiưu kết nối Internet)
 // =====================================================
 
 const rtcConfig = {
@@ -285,8 +285,6 @@ async () => {
     await createSenderPeer();
 	
 	watchConnectionState();
-	
-	startConnectionTimeout();
 
 });
 
@@ -369,7 +367,7 @@ async function createSenderPeer(){
 }
 
 // =====================================================
-// LISTEN ANSWER (Sửa lỗi chặn trùng lặp trạng thái stable)
+// LISTEN ANSWER
 // =====================================================
 
 function listenForAnswer(){
@@ -380,7 +378,6 @@ function listenForAnswer(){
         `rooms/${roomId}`
     );
 
-    // Lưu lại hàm hủy đăng ký sự kiện lắng nghe để hủy kích hoạt khi nhận được Answer hợp lệ
     unsubscribeAnswer = onValue(
         roomRef,
         async(snapshot)=>{
@@ -395,7 +392,6 @@ function listenForAnswer(){
                 return;
             }
 
-            // KIỂM TRA CHẶN: Nếu kết nối đã có RemoteDescription hoặc trạng thái đã ổn định thì bỏ qua luôn
             if(
                 peerConnection.currentRemoteDescription || 
                 peerConnection.signalingState === "stable"
@@ -404,11 +400,13 @@ function listenForAnswer(){
             }
 
             try {
-                // Hủy lắng nghe trên Firebase ngay lập tức để tránh nhận sự kiện rác lặp lại
                 if(unsubscribeAnswer) {
                     unsubscribeAnswer();
                     unsubscribeAnswer = null;
                 }
+
+                // Khi có Answer thực tế từ người nhận, lúc này mới kích hoạt đếm ngược Timeout kết nối
+                startConnectionTimeout();
 
                 await peerConnection.setRemoteDescription(
                     new RTCSessionDescription(data.answer)
@@ -440,7 +438,6 @@ function listenForAnswer(){
                     child.val();
 
                     try{
-                        // Chỉ thêm candidate khi remote description đã được thiết lập xong xuôi
                         if (peerConnection.remoteDescription) {
                             await peerConnection.addIceCandidate(
                                 new RTCIceCandidate(candidate)
@@ -518,6 +515,7 @@ async()=>{
 	
 	watchConnectionState();
 	
+    // Phía người nhận kích hoạt đếm ngược Timeout ngay khi nhấn nút kết nối
 	startConnectionTimeout();
 
 });
@@ -1240,7 +1238,7 @@ sec
 
 
 // =====================================================
-// CONNECTION TIMEOUT
+// CONNECTION TIMEOUT (Tăng thời gian đếm chờ kết nối lên 60 giây)
 // =====================================================
 
 let connectionTimeout = null;
@@ -1272,7 +1270,7 @@ function startConnectionTimeout(){
             );
         }
 
-    },30000);
+    }, 60000); // Tăng lên thành 60 giây để tối ưu kết nối diện rộng
 
 }
 
