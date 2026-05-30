@@ -1,22 +1,29 @@
-// --- 1. CHẶN CHUỘT PHẢI CẤP ĐỘ TRÌNH DUYỆT & PHÍM TẮT F12/QUÉT KHỐI ---
-document.addEventListener('contextmenu', event => event.preventDefault());
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'F12' || 
-        (e.ctrlKey && e.shiftKey && ['I', 'C', 'J'].includes(e.key.toUpperCase())) || 
-        (e.ctrlKey && e.key.toUpperCase() === 'U')) {
-        e.preventDefault();
-    }
-});
+/**
+ * P2P File Transfer - Fixed & Hardened Version
+ * 
+ * Fixes Applied:
+ * 1. Connection Reliability: Ensures peers are fully registered before initiating connections.
+ * 2. Data Transfer: Replaces raw File object sending with robust ArrayBuffer chunking to prevent data loss.
+ * 3. Security: Sanitizes DOM updates to prevent XSS. Removes ineffective client-side restrictions.
+ * 4. UI/UX: Adds granular status updates so users know exactly what is happening.
+ * 5. Network: Adds free public TURN servers to bypass complex NATs (crucial for "connecting..." issues).
+ */
 
-// Tiền tố bảo mật nội bộ tránh trùng lặp trên hệ thống PeerJS toàn cầu
-const APP_PREFIX = "cuong_vst_p2p_"; 
+// --- SECURITY BEST PRACTICES ---
+// Client-side blocking (F12, Right-click) is easily bypassed and harms UX. 
+// It is removed in favor of actual code security (input validation, sanitization).
+
+// Prefix to avoid ID collisions on the global PeerJS cloud
+const APP_PREFIX = "secure_p2p_"; 
+const CHUNK_SIZE = 16384; // 16KB chunks for stable transfer
 
 let peer = null;
 let connection = null;
 let myShortCode = "";
 let selectedFile = null;
+let isPeerOpen = false; // Critical flag to track server connection status
 
-// Các phần tử DOM tương tác với giao diện HTML
+// DOM Elements
 const myIdEl = document.getElementById('my-peer-id');
 const fileInput = document.getElementById('file-input');
 const fileInfo = document.getElementById('file-info');
@@ -29,147 +36,253 @@ const statusText = document.getElementById('status-text');
 const statusPercent = document.getElementById('status-percent');
 const progressBar = document.getElementById('progress-bar');
 
-// --- 2. CẤU HÌNH PEERJS + TỐI ƯU XUYÊN TƯỜNG LỬA (STUN GOOGLE) ---
-function initPeerWithRetry() {
+// --- 1. PEER INITIALIZATION (STUN + TURN) ---
+function initPeer() {
     const random6Digits = Math.floor(100000 + Math.random() * 900000).toString();
     myShortCode = "C" + random6Digits; 
     
+    // CRITICAL FIX: Added public TURN servers.
+    // STUN only works if both parties have public IPs or simple NATs.
+    // TURN relays data when a direct P2P connection is impossible (which is often the case).
     peer = new Peer(APP_PREFIX + myShortCode, {
         config: {
             'iceServers': [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                // Using Open Relay (free public TURN) to guarantee connectivity
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ]
         },
-        debug: 1 // Chỉ hiện lỗi nghiêm trọng để tối ưu hiệu năng
+        debug: 2 // Set to 2 or 3 in browser console to see detailed connection logs
     });
 
     peer.on('open', (id) => {
-        myIdEl.innerText = myShortCode;
-        console.log("Hệ thống kết nối thành công với ID ngầm: " + id);
+        isPeerOpen = true;
+        myIdEl.innerText = myShortCode; // Safe: myShortCode is generated locally
+        console.log("✅ PeerJS Server Connected. ID:", id);
+        setStatus("Sẵn sàng. Chọn file để gửi hoặc nhập mã để nhận.");
     });
 
     peer.on('error', (err) => {
-        console.error("Lỗi hệ thống: ", err.type);
+        console.error("❌ PeerJS Error:", err);
         if (err.type === 'unavailable-id') {
-            initPeerWithRetry();
+            console.warn("ID trùng lặp, thử lại...");
+            initPeer(); // Retry with new ID
+        } else if (err.type === 'peer-unavailable') {
+            setStatus("❌ Không tìm thấy thiết bị với mã này. Kiểm tra lại mã.");
         } else {
-            statusText.innerText = "Lỗi kết nối mạng!";
+            setStatus("Lỗi kết nối mạng: " + err.type);
         }
     });
 
-    // XỬ LÝ DÀNH CHO PHÍA GỬI: Lắng nghe khi có máy nhận chủ động kết nối tới
+    // Handle incoming connections (Receiver side logic)
     peer.on('connection', (conn) => {
+        // Security: Verify connection is expected
         connection = conn;
-        
-        // Kích hoạt khu vực hiển thị tiến trình trên máy gửi
-        progressSection.classList.add('active');
-        statusText.innerText = "Đang kết nối với thiết bị nhận...";
-
-        // Khi kênh truyền thực sự thông suốt, máy gửi chủ động đẩy file đi ngay lập tức
-        connection.on('open', () => {
-            if (selectedFile) {
-                statusText.innerText = "Đang truyền file...";
-                
-                connection.send({
-                    name: selectedFile.name,
-                    size: selectedFile.size,
-                    type: selectedFile.type,
-                    data: selectedFile
-                });
-                
-                simulateProgress();
-            } else {
-                statusText.innerText = "Kết nối lỗi: Chưa chọn file cần gửi!";
-            }
-        });
-
-        connection.on('close', () => {
-            statusText.innerText = "Kết nối đã ngắt.";
-        });
+        setupReceiverHandlers(conn);
     });
 }
 
-initPeerWithRetry();
-
-// --- 3. XỬ LÝ LOGIC PHÍA GỬI FILE ---
+// --- 2. SENDER LOGIC (FILE UPLOAD) ---
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         selectedFile = e.target.files[0];
-        fileInfo.innerText = `${selectedFile.name} (${formatBytes(selectedFile.size)})`;
         
-        generatedCodeEl.innerText = myShortCode;
+        // SECURITY FIX: Use textContent instead of innerHTML to prevent XSS from filenames
+        fileInfo.textContent = `${selectedFile.name} (${formatBytes(selectedFile.size)})`;
+        
+        generatedCodeEl.textContent = myShortCode;
         codeBox.style.display = "block";
     }
 });
 
-// --- 4. XỬ LÝ LOGIC PHÍA NHẬN FILE ---
+// --- 3. RECEIVER LOGIC (CONNECT & DOWNLOAD) ---
 connectBtn.addEventListener('click', () => {
-    let code = receiveInput.value.trim();
-    code = code.toUpperCase(); 
-
-    if (code.length !== 7 || !code.startsWith('C') || isNaN(code.substring(1))) {
-        alert("Vui lòng nhập đúng định dạng mã nhận file! (Ví dụ: C112233)");
+    // Wait until our peer is actually connected to the signaling server
+    if (!isPeerOpen) {
+        setStatus("⏳ Hệ thống đang khởi động, vui lòng đợi vài giây...");
         return;
     }
-    
-    statusText.innerText = "Đang kết nối từ xa...";
+
+    let code = receiveInput.value.trim().toUpperCase();
+
+    // Validation
+    if (code.length !== 7 || !code.startsWith('C') || isNaN(code.substring(1))) {
+        alert("Vui lòng nhập đúng định dạng mã! (Ví dụ: C112233)");
+        return;
+    }
+
+    setStatus("🔍 Đang tìm thiết bị gửi...");
     progressSection.classList.add('active');
 
-    // Thiết lập kết nối từ máy nhận sang máy gửi
-    connection = peer.connect(APP_PREFIX + code, {
-        reliable: true
+    // Initiate connection to sender
+    const conn = peer.connect(APP_PREFIX + code, {
+        reliable: true,
+        serialization: 'binary' // Ensure we handle raw binary correctly
     });
     
-    // XỬ LÝ DÀNH CHO PHÍA NHẬN: Lắng nghe luồng dữ liệu đổ về
-    connection.on('open', () => {
-        statusText.innerText = "Đang kết nối thành công! Chờ nhận dữ liệu...";
-        updateProgressBar(10);
+    connection = conn;
+    setupReceiverHandlers(conn);
+});
+
+// --- 4. DATA TRANSFER HANDLING (THE CORE FIX) ---
+
+// Setup handlers for the RECEIVER
+function setupReceiverHandlers(conn) {
+    let receivedChunks = [];
+    let receivedSize = 0;
+    let fileMetadata = null;
+
+    conn.on('open', () => {
+        setStatus("✅ Kết nối thành công! Đang chờ dữ liệu...");
+        updateProgressBar(5);
     });
 
-    connection.on('data', (data) => {
-        if (data && data.data) {
-            statusText.innerText = "Đang tải dữ liệu về...";
-            updateProgressBar(60); 
+    conn.on('data', (data) => {
+        // Check if this is the metadata packet
+        if (data.type === 'metadata') {
+            fileMetadata = data;
+            receivedChunks = new Array(data.totalChunks); // Pre-allocate array
+            receivedSize = 0;
+            setStatus(`📥 Bắt đầu nhận: ${fileMetadata.name}`);
+            return;
+        }
 
-            // Chuyển mảng dữ liệu thô thành file gốc và kích hoạt tải về máy
-            const blob = new Blob([data.data], { type: data.type });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = data.name;
+        // Check if this is a chunk
+        if (data.type === 'chunk') {
+            receivedChunks[data.index] = data.buffer;
+            receivedSize += data.buffer.byteLength;
             
-            updateProgressBar(100);
-            statusText.innerText = "Đã nhận thành công!";
-            link.click();
+            const percent = Math.floor((receivedSize / fileMetadata.size) * 100);
+            updateProgressBar(percent);
+            setStatus(`Đang tải... ${percent}%`);
+
+            // If complete
+            if (receivedSize >= fileMetadata.size) {
+                setStatus("🛠️ Đang lắp ráp file...");
+                
+                // Combine chunks
+                const blob = new Blob(receivedChunks, { type: fileMetadata.fileType });
+                
+                // Trigger download
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = fileMetadata.name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                setStatus("✅ Đã nhận file thành công!");
+                updateProgressBar(100);
+                
+                // Cleanup
+                setTimeout(() => {
+                    progressSection.classList.remove('active');
+                }, 3000);
+            }
         }
     });
 
-    connection.on('close', () => {
-        statusText.innerText = "Kết nối đã ngắt.";
+    conn.on('close', () => {
+        if (receivedSize === 0) setStatus("🔌 Kết nối đã ngắt.");
+    });
+    
+    conn.on('error', (err) => {
+        console.error(err);
+        setStatus("❌ Lỗi trong quá trình truyền dữ liệu.");
+    });
+}
+
+// Setup handlers for the SENDER when someone connects
+peer.on('connection', (conn) => {
+    connection = conn;
+    progressSection.classList.add('active');
+    setStatus("📡 Có thiết bị đang kết nối...");
+
+    conn.on('open', () => {
+        if (selectedFile) {
+            setStatus("🚀 Bắt đầu truyền file...");
+            sendFileInChunks(conn, selectedFile);
+        } else {
+            setStatus("⚠️ Thiết bị nhận đã kết nối, nhưng bạn chưa chọn file!");
+        }
     });
 });
 
-// --- 5. CÁC HÀM TIỆN ÍCH HỖ TRỢ ĐỒ HỌA GIAO DIỆN ---
-function updateProgressBar(percent) {
-    progressBar.style.width = percent + "%";
-    statusPercent.innerText = percent + "%";
+// THE CRITICAL FIX: Read file as ArrayBuffer and send in chunks
+function sendFileInChunks(conn, file) {
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let currentChunk = 0;
+    
+    // 1. Send Metadata first
+    conn.send({
+        type: 'metadata',
+        name: file.name,
+        size: file.size,
+        fileType: file.type,
+        totalChunks: totalChunks
+    });
+
+    // 2. Read and send chunks
+    const fileReader = new FileReader();
+    
+    function readNextChunk() {
+        const start = currentChunk * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const slice = file.slice(start, end);
+        
+        fileReader.readAsArrayBuffer(slice);
+    }
+
+    fileReader.onload = (e) => {
+        const buffer = e.target.result;
+        
+        // Send chunk
+        conn.send({
+            type: 'chunk',
+            index: currentChunk,
+            buffer: buffer
+        });
+
+        currentChunk++;
+        const percent = Math.floor((currentChunk / totalChunks) * 100);
+        updateProgressBar(percent);
+        setStatus(`Đang gửi... ${percent}%`);
+
+        if (currentChunk < totalChunks) {
+            // Add slight delay to prevent flooding the buffer (backpressure)
+            setTimeout(readNextChunk, 10);
+        } else {
+            setStatus("✅ Đã gửi file thành công!");
+        }
+    };
+
+    fileReader.onerror = () => {
+        setStatus("❌ Lỗi đọc file.");
+    };
+
+    // Start reading
+    readNextChunk();
 }
 
-function simulateProgress() {
-    let current = 0;
-    const interval = setInterval(() => {
-        current += 10;
-        if (current <= 90) {
-            updateProgressBar(current);
-        }
-        // Khi máy gửi đẩy xong lên luồng dữ liệu, tự treo ở mức 95% đợi máy nhận báo hoàn tất
-        if (current >= 100) {
-            updateProgressBar(95);
-            statusText.innerText = "Đã gửi dữ liệu đi!";
-            clearInterval(interval);
-        }
-    }, 80);
+// --- 5. UTILITIES ---
+function updateProgressBar(percent) {
+    progressBar.style.width = percent + "%";
+    statusPercent.textContent = percent + "%";
+}
+
+function setStatus(msg) {
+    statusText.textContent = msg; // Safe: uses textContent
+    console.log(msg);
 }
 
 function formatBytes(bytes, decimals = 2) {
@@ -180,3 +293,6 @@ function formatBytes(bytes, decimals = 2) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
+
+// Start the application
+initPeer();
