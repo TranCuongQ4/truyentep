@@ -12,7 +12,6 @@ html,
 body{
     width:100%;
     height:100%;
-    overflow:hidden;
 
     font-family:'Inter',sans-serif;
 
@@ -33,6 +32,8 @@ body{
     display:flex;
     justify-content:center;
     align-items:center;
+    padding:20px;
+    overflow-y:auto;
 }
 
 /* ===================================================
@@ -40,32 +41,31 @@ body{
 =================================================== */
 
 .app-frame{
-
     width:375px;
-    height:667px;
-
-    padding:10px;
-
+    max-height:90vh; /* Giới hạn chiều cao theo màn hình để kích hoạt cuộn trong */
+    padding:14px;
     display:flex;
     flex-direction:column;
-
-    gap:6px;
+    gap:10px;
 
     overflow-y:auto;
     overflow-x:hidden;
 
     border-radius:30px;
-
-    background:
-    rgba(15,23,42,.78);
-
+    background:rgba(15,23,42,.78);
     backdrop-filter:blur(20px);
-
     border:1px solid rgba(255,255,255,.08);
 
     box-shadow:
     0 25px 60px rgba(0,0,0,.65),
     inset 0 1px 0 rgba(255,255,255,.06);
+    
+    /* Ẩn thanh cuộn mặc định của trình duyệt để nhìn gọn hơn */
+    scrollbar-width: none; 
+}
+
+.app-frame::-webkit-scrollbar {
+    display: none; 
 }
 
 /* ===================================================
@@ -73,20 +73,15 @@ body{
 =================================================== */
 
 .header-card{
-
     text-align:center;
-
-    padding:8px;
-
+    padding:10px;
     border-radius:20px;
-
     background:
     linear-gradient(
     180deg,
     rgba(255,255,255,.08),
     rgba(255,255,255,.02)
     );
-
     border:1px solid rgba(255,255,255,.08);
 }
 
@@ -95,24 +90,16 @@ body{
 }
 
 .app-title{
-
     margin-top:4px;
-
     font-size:16px;
     font-weight:800;
-
     color:#ffffff;
-
-    text-shadow:
-    0 0 12px rgba(59,130,246,.8);
+    text-shadow:0 0 12px rgba(59,130,246,.8);
 }
 
 .app-subtitle{
-
     margin-top:4px;
-
     font-size:11px;
-
     color:#94a3b8;
 }
 
@@ -121,27 +108,19 @@ body{
 =================================================== */
 
 .status-card{
-
     padding:12px;
-
     border-radius:18px;
-
     background:#111827;
-
     border:1px solid rgba(255,255,255,.08);
 }
 
 .status-label{
-
     font-size:12px;
-
     color:#94a3b8;
-
     margin-bottom:5px;
 }
 
 .status-value{
-
     font-size:16px;
     font-weight:700;
 }
@@ -157,25 +136,19 @@ body{
 .section-card,
 .transfer-card,
 .log-card{
-
     background:#111827;
-
     border-radius:20px;
-
     border:1px solid rgba(255,255,255,.08);
-
-    padding:12px;
+    padding:14px;
+    flex-shrink: 0; /* Không cho phép các khối nội dung bị ép co lại */
 }
 
 .section-title,
 .transfer-title,
 .log-title{
-
     font-size:15px;
     font-weight:700;
-
     margin-bottom:10px;
-
     color:#ffffff;
 }
 
@@ -184,75 +157,56 @@ body{
 =================================================== */
 
 .btn3d{
-
     width:100%;
-
     border:none;
-
     cursor:pointer;
-
     padding:14px;
-
     border-radius:16px;
-
     font-size:15px;
     font-weight:700;
-
     color:#fff;
-
     display:flex;
     align-items:center;
     justify-content:center;
-
     transition:.15s;
 }
 
 .btn3d:active{
-
-    transform:
-    translateY(3px);
-
+    transform:translateY(3px);
     box-shadow:none;
 }
 
 .primary-btn{
-
     background:
     linear-gradient(
     180deg,
     #8b5cf6,
     #6d28d9);
-
     box-shadow:
-    0 10px 20px rgba(109,40,217,.45),
+    0 8px 16px rgba(109,40,217,.35),
     inset 0 2px 2px rgba(255,255,255,.25);
 }
 
 .success-btn{
-
-    margin-top:10px;
-
+    margin-top:12px;
     background:
     linear-gradient(
     180deg,
     #22c55e,
     #15803d);
-
     box-shadow:
-    0 10px 20px rgba(34,197,94,.4),
+    0 8px 16px rgba(34,197,94,.3),
     inset 0 2px 2px rgba(255,255,255,.25);
 }
 
 .blue-btn{
-
     background:
     linear-gradient(
     180deg,
     #3b82f6,
     #1d4ed8);
-
     box-shadow:
-    0 10px 20px rgba(59,130,246,.4),
+    0 8px 16px rgba(59,130,246,.3),
     inset 0 2px 2px rgba(255,255,255,.25);
 }
 
@@ -261,17 +215,11 @@ body{
 =================================================== */
 
 .file-name{
-
-    margin-top:4px;
-
+    margin-top:6px;
     text-align:center;
-
     font-size:12px;
-
     color:#cbd5e1;
-
     min-height:18px;
-
     word-break:break-all;
 }
 
@@ -280,55 +228,35 @@ body{
 =================================================== */
 
 .room-box{
-
-    margin-top:6px;
-
+    margin-top:8px;
     text-align:center;
 }
 
 .room-label{
-
     font-size:11px;
-
     color:#94a3b8;
 }
 
 .room-code{
-
     margin-top:4px;
-
     font-size:28px;
-
     font-weight:800;
-
     color:#22c55e;
-
     letter-spacing:3px;
 }
 
 .room-input{
-
     width:100%;
-
     height:48px;
-
-    margin-bottom:10px;
-
+    margin-bottom:12px;
     border:none;
-
     outline:none;
-
     border-radius:14px;
-
     text-align:center;
-
     font-size:20px;
     font-weight:700;
-
     background:#0f172a;
-
     color:#fff;
-
     border:1px solid rgba(255,255,255,.08);
 }
 
@@ -337,27 +265,18 @@ body{
 =================================================== */
 
 .qr-wrapper{
-
     display:flex;
-
     justify-content:center;
-
     align-items:center;
-
     margin-top:10px;
-
-    min-height:100px;
+    min-height:80px;
 }
 
 #qrCanvas{
-
-    width:70px !important;
-    height:70px !important;
-
+    width:80px !important;
+    height:80px !important;
     background:#fff;
-
     padding:4px;
-
     border-radius:10px;
 }
 
@@ -366,42 +285,29 @@ body{
 =================================================== */
 
 .progress-wrap{
-
     width:100%;
     height:20px;
-
     background:#0f172a;
-
     border-radius:20px;
-
     overflow:hidden;
-
     border:1px solid rgba(255,255,255,.06);
 }
 
 .progress-bar{
-
     width:0%;
-
     height:100%;
-
     background:
     linear-gradient(
     90deg,
     #22c55e,
     #3b82f6);
-
     transition:.25s;
 }
 
 .progress-percent{
-
     text-align:center;
-
     margin-top:8px;
-
     font-weight:700;
-
     color:#22c55e;
 }
 
@@ -410,40 +316,27 @@ body{
 =================================================== */
 
 .stats-grid{
-
     display:grid;
-
     grid-template-columns:1fr 1fr;
-
     gap:8px;
-
     margin-top:8px;
 }
 
 .stat-box{
-
     padding:8px;
-
     border-radius:12px;
-
     background:#0f172a;
 }
 
 .stat-label{
-
     font-size:10px;
-
     color:#94a3b8;
 }
 
 .stat-value{
-
     margin-top:3px;
-
     font-size:13px;
-
     font-weight:700;
-
     color:#fff;
 }
 
@@ -452,17 +345,11 @@ body{
 =================================================== */
 
 .log-box{
-
-    height:80px;
-
-    overflow:auto;
-
+    height:90px;
+    overflow-y:auto;
     font-size:11px;
-
     line-height:1.5;
-
     color:#cbd5e1;
-
     padding-right:4px;
 }
 
@@ -480,40 +367,24 @@ body{
 =================================================== */
 
 .toast{
-
     position:fixed;
-
     bottom:25px;
-
     left:50%;
-
     transform:translateX(-50%);
-
     min-width:250px;
-
     padding:14px 18px;
-
     border-radius:14px;
-
     background:#111827;
-
     color:#fff;
-
     text-align:center;
-
     opacity:0;
-
     pointer-events:none;
-
     transition:.3s;
-
     border:1px solid rgba(255,255,255,.08);
-
     z-index:9999;
 }
 
 .toast.show{
-
     opacity:1;
 }
 
@@ -522,33 +393,17 @@ body{
 =================================================== */
 
 @media(max-width:420px){
-
+    body {
+        padding: 0;
+    }
     .app-frame{
-
         width:100vw;
         height:100vh;
-
+        max-height:100vh;
         border-radius:0;
-
-        overflow-y:auto;
-        overflow-x:hidden;
     }
-
-}
-
-.section-card,
-.transfer-card,
-.log-card{
-
-    flex-shrink:1;
-
-    min-height:0;
 }
 
 .app-frame{
     -webkit-overflow-scrolling:touch;
-}
-
-.app-frame{
-    scrollbar-width:none;
 }
