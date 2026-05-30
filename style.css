@@ -1,0 +1,222 @@
+/* --- Cấu hình chặn tương tác & Reset --- */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    /* Chặn bôi đen / quét khối văn bản */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+body {
+    background-color: #0a0a0c;
+    color: #e0e0e6;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden; /* Tuyệt đối không cho cuộn trang */
+}
+
+/* --- Khung cố định chuẩn di động theo yêu cầu --- */
+.app-container {
+    width: 375px;
+    height: 667px;
+    background-color: #121216;
+    border: 2px solid #1f1f2e;
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Đẩy đều các phần tử trong khung */
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    position: relative;
+}
+
+/* --- Tiêu đề nổi 3D màu xanh --- */
+.app-title {
+    font-size: 19px;
+    text-align: center;
+    color: #00ffcc;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 0;
+    text-shadow: 
+        0 1px 0 #00b38f,
+        0 2px 0 #00997a,
+        0 3px 0 #008066,
+        0 4px 5px rgba(0, 255, 204, 0.4);
+}
+
+.my-id-section {
+    background: #1a1a24;
+    padding: 6px 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 12px;
+    color: #aaa;
+    border: 1px dashed #333;
+}
+.my-id-section strong {
+    color: #00ffcc;
+}
+
+/* --- Bố cục nội dung chính --- */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 12px; /* Khoảng cách giữa các khối */
+    margin: 10px 0;
+}
+
+.card {
+    background-color: #1a1a24;
+    border: 1px solid #2a2a3a;
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+}
+
+.card h3 {
+    font-size: 14px;
+    color: #8f94a5;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+}
+
+/* --- Thiết kế các nút và ô nhập liệu --- */
+input[type="file"] {
+    display: none;
+}
+
+.custom-file-upload {
+    display: inline-block;
+    background: linear-gradient(135deg, #00ffcc 0%, #00a3ff 100%);
+    color: #000;
+    font-weight: bold;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: transform 0.1s ease;
+    width: 100%;
+}
+
+.custom-file-upload:active {
+    transform: scale(0.98);
+}
+
+.info-text {
+    font-size: 11px;
+    color: #777;
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Khối hiển thị mã 6 số */
+.code-display-box {
+    margin-top: 10px;
+    background: #121216;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #00ffcc22;
+}
+.code-display-box p {
+    font-size: 11px;
+    color: #888;
+}
+#generated-code {
+    font-size: 22px;
+    font-weight: bold;
+    color: #00ffcc;
+    letter-spacing: 4px;
+}
+
+/* Hướng Nhận */
+.input-group {
+    display: flex;
+    gap: 8px;
+}
+
+#receive-code-input {
+    flex: 1;
+    background-color: #121216;
+    border: 1px solid #3a3a4a;
+    border-radius: 8px;
+    padding: 10px;
+    color: #fff;
+    font-size: 16px;
+    text-align: center;
+    letter-spacing: 2px;
+    outline: none;
+}
+
+#receive-code-input:focus {
+    border-color: #00a3ff;
+}
+
+#connect-btn {
+    background-color: #00a3ff;
+    border: none;
+    color: white;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+#connect-btn:active {
+    opacity: 0.8;
+}
+
+/* --- Thanh trạng thái % và Thanh chạy tiến trình --- */
+.progress-section {
+    background-color: #1a1a24;
+    border-top: 1px solid #2a2a3a;
+    padding: 12px;
+    border-radius: 10px;
+    opacity: 0.4; /* Mờ đi khi chưa có tác vụ */
+    transition: opacity 0.3s ease;
+}
+
+.progress-section.active {
+    opacity: 1;
+}
+
+.status-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: #aaa;
+}
+
+#status-percent {
+    color: #00ffcc;
+    font-weight: bold;
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: #121216;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00a3ff, #00ffcc);
+    border-radius: 4px;
+    transition: width 0.1s linear;
+}
