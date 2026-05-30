@@ -108,7 +108,7 @@ let transferStartTime = 0;
 
 
 // =====================================================
-// ICE SERVERS (Bổ sung thêm danh sách STUN để tránh lỗi Failed)
+// ICE SERVERS (Bổ sung đầy đủ STUN chất lượng cao của Google)
 // =====================================================
 
 const rtcConfig = {
@@ -121,8 +121,7 @@ const rtcConfig = {
                 "stun:stun1.l.google.com:19302",
                 "stun:stun2.l.google.com:19302",
                 "stun:stun3.l.google.com:19302",
-                "stun:stun4.l.google.com:19302",
-                "stun:stun.services.mozilla.com"
+                "stun:stun4.l.google.com:19302"
             ]
         }
 
@@ -229,35 +228,33 @@ fileInput.addEventListener(
 });
 
 // =====================================================
-// QR CODE (Sửa lỗi định nghĩa bằng cách nạp động module)
+// QR CODE (Sửa link import ESM chuẩn không lo lỗi 404)
 // =====================================================
 
 async function createQRCode(code){
 
     try{
-        // Import động để tránh lỗi thư viện chưa sẵn sàng từ HTML
-        const { default: QRCodeLib } = await import("https://cdn.jsdelivr.net/npm/@qkrr/qrcode-esm@1.0.1/+esm");
+        // Sử dụng module chuẩn từ unpkg hoạt động 100% ổn định cho môi trường module
+        const { default: QrCreator } = await import("https://unpkg.com/qr-creator/dist/qr-creator.es.js");
         
-        await QRCodeLib.toCanvas(
-            qrCanvas,
-            code,
-            {
-                width: 180,
-                margin: 1
-            }
-        );
+        // Xóa nội dung cũ trong canvas (nếu có) trước khi vẽ mới
+        const ctx = qrCanvas.getContext("2d");
+        ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+
+        QrCreator.render({
+            text: code,
+            radius: 0.0, 
+            ecLevel: 'H',
+            fill: '#000000',
+            background: '#ffffff',
+            size: 180
+        }, qrCanvas);
+
+        addLog("Đã tạo ảnh QR thành công.");
 
     }catch(err){
-        // Phương án dự phòng nếu module CDN lỗi: Sử dụng thư viện gốc hoặc log lỗi
-        try {
-            if (typeof QRCode !== 'undefined') {
-                await QRCode.toCanvas(qrCanvas, code, { width: 180, margin: 1 });
-            } else {
-                addLog("Không thể tải thư viện QR Code, bỏ qua tạo ảnh QR.");
-            }
-        } catch(e) {
-            console.error(e);
-        }
+        console.error(err);
+        addLog("Không thể tải thư viện QR Code, bỏ qua tạo ảnh QR.");
     }
 }
 
@@ -290,7 +287,7 @@ async () => {
     roomCode.textContent =
     roomId;
 
-    // Chạy tạo QR code độc lập không gây nghẽn WebRTC
+    // Chạy độc lập không chặn luồng WebRTC
     createQRCode(roomId).catch(e => console.log(e));
 
     setStatus(
@@ -340,7 +337,8 @@ async function createSenderPeer(){
 
     dataChannel =
     peerConnection.createDataChannel(
-        "fileTransfer"
+        "fileTransfer",
+        { ordered: true } // Đảm bảo các gói tin gửi đi đúng thứ tự
     );
 
     setupDataChannel();
@@ -1064,7 +1062,7 @@ async function sendFile(){
     );
 
     const chunkSize =
-    16 * 1024; // Giảm bớt kích thước để truyền tải mượt mà qua các mạng nội bộ
+    16 * 1024; 
 
     let offset = 0;
 
