@@ -1,287 +1,1411 @@
-/**
-         * P2P File Transfer - Fixed & Hardened Version
-         * 
-         * Fixes Applied:
-         * 1. Connection Reliability: Ensures peers are fully registered before initiating connections.
-         * 2. Data Transfer: Replaces raw File object sending with robust ArrayBuffer chunking to prevent data loss.
-         * 3. Security: Sanitizes DOM updates to prevent XSS. Removes ineffective client-side restrictions.
-         * 4. UI/UX: Adds granular status updates so users know exactly what is happening.
-         * 5. Network: Adds free public TURN servers to bypass complex NATs (crucial for "connecting..." issues).
-         */
+// =====================================================
+// FIREBASE IMPORT
+// =====================================================
 
-        const APP_PREFIX = "secure_p2p_"; 
-        const CHUNK_SIZE = 16384; // 16KB chunks
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 
-        let peer = null;
-        let connection = null;
-        let myShortCode = "";
-        let selectedFile = null;
-        let isPeerOpen = false;
+import {
+    getDatabase,
+    ref,
+    set,
+    get,
+    update,
+    push,
+    onValue,
+    remove
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
 
-        // DOM Elements
-        const myIdEl = document.getElementById('my-peer-id');
-        const fileInput = document.getElementById('file-input');
-        const fileInfo = document.getElementById('file-info');
-        const codeBox = document.getElementById('code-box');
-        const generatedCodeEl = document.getElementById('generated-code');
-        const receiveInput = document.getElementById('receive-code-input');
-        const connectBtn = document.getElementById('connect-btn');
-        const progressSection = document.getElementById('progress-section');
-        const statusText = document.getElementById('status-text');
-        const statusPercent = document.getElementById('status-percent');
-        const progressBar = document.getElementById('progress-bar');
 
-        // --- 1. PEER INITIALIZATION ---
-        function initPeer() {
-            const random6Digits = Math.floor(100000 + Math.random() * 900000).toString();
-            myShortCode = "C" + random6Digits; 
-            
-            peer = new Peer(APP_PREFIX + myShortCode, {
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        // FREE TURN SERVERS - Critical for NAT traversal
-                        {
-                            urls: 'turn:openrelay.metered.ca:80',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        {
-                            urls: 'turn:openrelay.metered.ca:443',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        }
-                    ]
-                },
-                debug: 2
-            });
+// =====================================================
+// FIREBASE CONFIG
+// =====================================================
 
-            peer.on('open', (id) => {
-                isPeerOpen = true;
-                myIdEl.textContent = myShortCode;
-                console.log("PeerJS Server Connected. ID:", id);
-                setStatus("Sẵn sàng. Chọn file để gửi hoặc nhập mã để nhận.");
-            });
+const firebaseConfig = {
+    apiKey: "AIzaSyCwgBsmd9GFtIp3LD_aBV_VYZCheb2CvgI",
+    authDomain: "cuongdata.firebaseapp.com",
+    databaseURL: "https://cuongdata-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "cuongdata",
+    storageBucket: "cuongdata.firebasestorage.app",
+    messagingSenderId: "10726452052",
+    appId: "1:10726452052:web:fc724b6775f492cdf136c1",
+    measurementId: "G-PJJMR87MTJ"
+};
 
-            peer.on('error', (err) => {
-                console.error("PeerJS Error:", err);
-                if (err.type === 'unavailable-id') {
-                    initPeer();
-                } else if (err.type === 'peer-unavailable') {
-                    setStatus("Không tìm thấy thiết bị với mã này. Kiểm tra lại mã.");
-                } else {
-                    setStatus("Lỗi kết nối mạng: " + err.type);
-                }
-            });
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-            // Handle incoming connections
-            peer.on('connection', (conn) => {
-                connection = conn;
-                setupConnectionHandlers(conn, 'receiver');
-            });
+
+// =====================================================
+// DOM
+// =====================================================
+
+const fileInput = document.getElementById("fileInput");
+
+const createRoomBtn = document.getElementById("createRoomBtn");
+
+const joinRoomBtn = document.getElementById("joinRoomBtn");
+
+const roomInput = document.getElementById("roomInput");
+
+const roomCode = document.getElementById("roomCode");
+
+const fileName = document.getElementById("fileName");
+
+const connectionStatus =
+document.getElementById("connectionStatus");
+
+const progressBar =
+document.getElementById("progressBar");
+
+const progressPercent =
+document.getElementById("progressPercent");
+
+const transferSize =
+document.getElementById("transferSize");
+
+const transferSpeed =
+document.getElementById("transferSpeed");
+
+const remainingTime =
+document.getElementById("remainingTime");
+
+const transferMode =
+document.getElementById("transferMode");
+
+const logBox =
+document.getElementById("logBox");
+
+const toast =
+document.getElementById("toast");
+
+const qrCanvas =
+document.getElementById("qrCanvas");
+
+
+// =====================================================
+// GLOBAL
+// =====================================================
+
+let selectedFile = null;
+
+let roomId = null;
+
+let isSender = false;
+
+let peerConnection = null;
+
+let dataChannel = null;
+
+let receiveBuffers = [];
+
+let receiveSize = 0;
+
+let expectedFileSize = 0;
+
+let expectedFileName = "";
+
+let transferStartTime = 0;
+
+
+// =====================================================
+// ICE SERVERS
+// =====================================================
+
+const rtcConfig = {
+
+    iceServers: [
+
+        {
+            urls: [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302"
+            ]
         }
 
-        // --- 2. SENDER LOGIC ---
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                selectedFile = e.target.files[0];
-                
-                fileInfo.textContent = `${selectedFile.name} (${formatBytes(selectedFile.size)})`;
-                fileInfo.classList.remove('hidden');
-                
-                generatedCodeEl.textContent = myShortCode;
-                codeBox.classList.remove('hidden');
-            }
-        });
+    ]
+};
 
-        // --- 3. RECEIVER LOGIC ---
-        connectBtn.addEventListener('click', () => {
-            if (!isPeerOpen) {
-                setStatus("Hệ thống đang khởi động, vui lòng đợi vài giây...");
+
+// =====================================================
+// LOG
+// =====================================================
+
+function addLog(text){
+
+    const time =
+    new Date().toLocaleTimeString();
+
+    logBox.innerHTML +=
+    `<div>[${time}] ${text}</div>`;
+
+    logBox.scrollTop =
+    logBox.scrollHeight;
+
+    console.log(text);
+}
+
+
+// =====================================================
+// TOAST
+// =====================================================
+
+function showToast(text){
+
+    toast.textContent = text;
+
+    toast.classList.add("show");
+
+    setTimeout(() => {
+
+        toast.classList.remove("show");
+
+    },3000);
+}
+
+
+// =====================================================
+// STATUS
+// =====================================================
+
+function setStatus(text,color="#22c55e"){
+
+    connectionStatus.textContent = text;
+
+    connectionStatus.style.color = color;
+
+    addLog(text);
+}
+
+
+// =====================================================
+// RANDOM ROOM
+// =====================================================
+
+function generateRoomCode(){
+
+    const chars =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    let code = "";
+
+    for(let i=0;i<6;i++){
+
+        code +=
+        chars[Math.floor(
+        Math.random()*chars.length
+        )];
+    }
+
+    return code;
+}
+
+
+// =====================================================
+// FILE SELECT
+// =====================================================
+
+fileInput.addEventListener(
+"change",
+() => {
+
+    if(!fileInput.files.length)
+        return;
+
+    selectedFile =
+    fileInput.files[0];
+
+    fileName.textContent =
+    selectedFile.name;
+
+    addLog(
+    `Đã chọn file: ${selectedFile.name}`
+    );
+
+});
+
+// =====================================================
+// QR CODE
+// =====================================================
+
+async function createQRCode(code){
+
+    try{
+
+        await QRCode.toCanvas(
+            qrCanvas,
+            code,
+            {
+                width: 180,
+                margin: 1
+            }
+        );
+
+    }catch(err){
+
+        console.error(err);
+    }
+}
+
+
+// =====================================================
+// CREATE ROOM
+// =====================================================
+
+createRoomBtn.addEventListener(
+"click",
+async () => {
+
+    if(
+    !selectedFile ||
+    selectedFile.size === 0
+){
+
+        showToast(
+        "Vui lòng chọn file trước"
+        );
+
+        return;
+    }
+
+    isSender = true;
+
+    roomId =
+    generateRoomCode();
+
+    roomCode.textContent =
+    roomId;
+
+    await createQRCode(roomId);
+
+    setStatus(
+    "Đang tạo phòng..."
+    );
+
+    const roomRef =
+    ref(
+        db,
+        `rooms/${roomId}`
+    );
+
+    await set(
+        roomRef,
+        {
+            createdAt: Date.now(),
+            status: "waiting"
+        }
+    );
+
+    addLog(
+    `Đã tạo phòng ${roomId}`
+    );
+
+    setStatus(
+    "Đang chờ người nhận..."
+    );
+
+    await createSenderPeer();
+	
+	watchConnectionState();
+	
+	startConnectionTimeout();
+
+});
+
+// =====================================================
+// SENDER PEER
+// =====================================================
+
+async function createSenderPeer(){
+
+    peerConnection =
+    new RTCPeerConnection(
+        rtcConfig
+    );
+
+    dataChannel =
+    peerConnection.createDataChannel(
+        "fileTransfer"
+    );
+
+    setupDataChannel();
+
+    peerConnection.onicecandidate =
+    async (event) => {
+
+        if(!event.candidate)
+            return;
+
+        const candidateRef =
+        push(
+            ref(
+                db,
+                `rooms/${roomId}/offerCandidates`
+            )
+        );
+
+        await set(
+            candidateRef,
+            event.candidate.toJSON()
+        );
+    };
+
+
+    const offer =
+    await peerConnection.createOffer();
+
+    await peerConnection.setLocalDescription(
+        offer
+    );
+
+    await update(
+
+        ref(
+            db,
+            `rooms/${roomId}`
+        ),
+
+        {
+            offer: {
+
+                type:
+                offer.type,
+
+                sdp:
+                offer.sdp
+            }
+        }
+
+    );
+
+    addLog(
+    "Đã tạo WebRTC Offer"
+    );
+
+    listenForAnswer();
+}
+
+// =====================================================
+// LISTEN ANSWER
+// =====================================================
+
+function listenForAnswer(){
+
+    const roomRef =
+    ref(
+        db,
+        `rooms/${roomId}`
+    );
+
+    onValue(
+        roomRef,
+        async(snapshot)=>{
+
+            const data =
+            snapshot.val();
+
+            if(
+                !data ||
+                !data.answer
+            ){
                 return;
             }
 
-            let code = receiveInput.value.trim().toUpperCase();
-
-            if (code.length !== 7 || !code.startsWith('C') || isNaN(code.substring(1))) {
-                alert("Vui lòng nhập đúng định dạng mã! (Ví dụ: C112233)");
+            if(
+                peerConnection
+                .currentRemoteDescription
+            ){
                 return;
             }
 
-            setStatus("Đang tìm thiết bị gửi...");
-            progressSection.classList.add('active');
+            await peerConnection
+            .setRemoteDescription(
 
-            const conn = peer.connect(APP_PREFIX + code, {
-                reliable: true,
-                serialization: 'binary'
-            });
-            
-            connection = conn;
-            setupConnectionHandlers(conn, 'sender');
-        });
+                new RTCSessionDescription(
+                    data.answer
+                )
 
-        // --- 4. CONNECTION HANDLERS ---
-        function setupConnectionHandlers(conn, role) {
-            let receivedChunks = [];
-            let receivedSize = 0;
-            let fileMetadata = null;
-            let expectedChunks = 0;
+            );
 
-            conn.on('open', () => {
-                if (role === 'sender') {
-                    setStatus("Kết nối thành công! Đang chờ dữ liệu...");
-                    updateProgressBar(5);
-                } else {
-                    // Receiver role - sender connected to us
-                    if (selectedFile) {
-                        setStatus("Bắt đầu truyền file...");
-                        sendFileInChunks(conn, selectedFile);
-                    } else {
-                        setStatus("Thiết bị đã kết nối. Chọn file để gửi!");
+            addLog(
+            "Người nhận đã kết nối"
+            );
+
+            setStatus(
+            "Đã kết nối",
+            "#22c55e"
+            );
+
+        }
+    );
+
+
+    const answerCandidatesRef =
+    ref(
+        db,
+        `rooms/${roomId}/answerCandidates`
+    );
+
+    onValue(
+        answerCandidatesRef,
+        async(snapshot)=>{
+
+            snapshot.forEach(
+                async(child)=>{
+
+                    const candidate =
+                    child.val();
+
+                    try{
+
+                        await peerConnection
+                        .addIceCandidate(
+                            new RTCIceCandidate(
+                                candidate
+                            )
+                        );
+
+                    }catch(err){
+
+                        console.error(err);
                     }
+
                 }
-            });
+            );
 
-            conn.on('data', (data) => {
-                // Handle metadata
-                if (data.type === 'metadata') {
-                    fileMetadata = data;
-                    expectedChunks = data.totalChunks;
-                    receivedChunks = new Array(expectedChunks);
-                    receivedSize = 0;
-                    setStatus(`Bắt đầu nhận: ${fileMetadata.name}`);
-                    progressSection.classList.add('active');
-                    return;
-                }
+        }
+    );
 
-                // Handle chunk
-                if (data.type === 'chunk') {
-                    receivedChunks[data.index] = new Uint8Array(data.buffer);
-                    receivedSize += data.buffer.byteLength;
-                    
-                    const percent = Math.floor((receivedSize / fileMetadata.size) * 100);
-                    updateProgressBar(percent);
-                    setStatus(`Đang tải... ${percent}%`);
+}
 
-                    // Check if complete
-                    if (receivedSize >= fileMetadata.size) {
-                        setStatus("Đang lắp ráp file...");
-                        
-                        // Combine all chunks
-                        const totalLength = receivedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
-                        const combined = new Uint8Array(totalLength);
-                        let offset = 0;
-                        for (const chunk of receivedChunks) {
-                            combined.set(chunk, offset);
-                            offset += chunk.length;
-                        }
-                        
-                        const blob = new Blob([combined], { type: fileMetadata.fileType });
-                        
-                        // Trigger download
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = fileMetadata.name;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(link.href);
-                        
-                        setStatus("Đã nhận file thành công!");
-                        updateProgressBar(100);
-                        
-                        setTimeout(() => {
-                            progressSection.classList.remove('active');
-                        }, 5000);
+// =====================================================
+// JOIN ROOM
+// =====================================================
+
+joinRoomBtn.addEventListener(
+"click",
+async()=>{
+
+    const code =
+    roomInput.value
+    .trim()
+    .toUpperCase();
+
+    if(!code){
+
+        showToast(
+        "Nhập mã phòng"
+        );
+
+        return;
+    }
+
+    roomId = code;
+
+    setStatus(
+    "Đang tìm phòng...",
+    "#facc15"
+    );
+
+    const roomRef =
+    ref(
+        db,
+        `rooms/${roomId}`
+    );
+
+    const snap =
+    await get(roomRef);
+
+    if(!snap.exists()){
+
+        showToast(
+        "Không tìm thấy phòng"
+        );
+
+        setStatus(
+        "Không tìm thấy",
+        "#ef4444"
+        );
+
+        return;
+    }
+
+    addLog(
+    `Đã tìm thấy phòng ${roomId}`
+    );
+
+    await joinAsReceiver();
+	
+	watchConnectionState();
+	
+	startConnectionTimeout();
+
+});
+
+// =====================================================
+// RECEIVER PEER
+// =====================================================
+
+async function joinAsReceiver(){
+
+    const roomData =
+    (
+        await get(
+            ref(
+                db,
+                `rooms/${roomId}`
+            )
+        )
+    ).val();
+
+    if(
+        !roomData ||
+        !roomData.offer
+    ){
+
+        showToast(
+        "Phòng chưa sẵn sàng"
+        );
+
+        return;
+    }
+
+    peerConnection =
+    new RTCPeerConnection(
+        rtcConfig
+    );
+
+    peerConnection.ondatachannel =
+    (event)=>{
+
+        dataChannel =
+        event.channel;
+
+        setupDataChannel();
+
+        addLog(
+        "DataChannel đã mở"
+        );
+
+    };
+
+    peerConnection.onicecandidate =
+    async(event)=>{
+
+        if(!event.candidate)
+            return;
+
+        const candidateRef =
+        push(
+            ref(
+                db,
+                `rooms/${roomId}/answerCandidates`
+            )
+        );
+
+        await set(
+            candidateRef,
+            event.candidate.toJSON()
+        );
+    };
+
+    await peerConnection
+    .setRemoteDescription(
+
+        new RTCSessionDescription(
+            roomData.offer
+        )
+
+    );
+
+    addLog(
+    "Đã nhận Offer"
+    );
+
+    const answer =
+    await peerConnection
+    .createAnswer();
+
+    await peerConnection
+    .setLocalDescription(
+        answer
+    );
+
+    await update(
+
+        ref(
+            db,
+            `rooms/${roomId}`
+        ),
+
+        {
+            answer:{
+                type:answer.type,
+                sdp:answer.sdp
+            },
+
+            status:"connected"
+        }
+
+    );
+
+    addLog(
+    "Đã gửi Answer"
+    );
+
+    setStatus(
+    "Đang kết nối...",
+    "#22c55e"
+    );
+
+    listenOfferCandidates();
+}
+
+// =====================================================
+// OFFER CANDIDATES
+// =====================================================
+
+function listenOfferCandidates(){
+
+    const offerCandidatesRef =
+    ref(
+        db,
+        `rooms/${roomId}/offerCandidates`
+    );
+
+    onValue(
+        offerCandidatesRef,
+        async(snapshot)=>{
+
+            snapshot.forEach(
+                async(child)=>{
+
+                    const candidate =
+                    child.val();
+
+                    try{
+
+                        await peerConnection
+                        .addIceCandidate(
+
+                            new RTCIceCandidate(
+                                candidate
+                            )
+
+                        );
+
+                    }catch(err){
+
+                        console.error(err);
                     }
+
                 }
-            });
+            );
 
-            conn.on('close', () => {
-                if (receivedSize === 0 || (fileMetadata && receivedSize < fileMetadata.size)) {
-                    setStatus("Kết nối đã ngắt.");
-                }
-            });
-            
-            conn.on('error', (err) => {
-                console.error("Connection error:", err);
-                setStatus("Lỗi trong quá trình truyền dữ liệu.");
-            });
+        }
+    );
+}
+
+// =====================================================
+// CONNECTION STATE
+// =====================================================
+
+function watchConnectionState(){
+
+    peerConnection
+    .onconnectionstatechange =
+    ()=>{
+
+        const state =
+        peerConnection
+        .connectionState;
+
+        addLog(
+        `State: ${state}`
+        );
+
+        switch(state){
+
+            case "connected":
+			
+			    clearConnectionTimeout();
+
+                setStatus(
+                "Đã kết nối",
+                "#22c55e"
+                );
+
+                break;
+
+            case "connecting":
+
+                setStatus(
+                "Đang kết nối",
+                "#facc15"
+                );
+
+                break;
+
+            case "disconnected":
+
+                setStatus(
+                "Mất kết nối",
+                "#ef4444"
+                );
+
+                break;
+
+            case "failed":
+
+                setStatus(
+                "Kết nối lỗi",
+                "#ef4444"
+                );
+
+                break;
+
+            case "closed":
+
+                setStatus(
+                "Đã đóng",
+                "#94a3b8"
+                );
+
+                break;
+        }
+    };
+}
+
+
+// =====================================================
+// DATACHANNEL
+// =====================================================
+
+function setupDataChannel(){
+
+    if(!dataChannel)
+        return;
+
+    dataChannel.binaryType =
+    "arraybuffer";
+
+    dataChannel.onopen =
+    ()=>{
+
+        addLog(
+        "DataChannel OPEN"
+        );
+
+        setStatus(
+        "Đã kết nối",
+        "#22c55e"
+        );
+
+        if(
+            isSender &&
+            selectedFile
+        ){
+
+            setTimeout(()=>{
+
+                sendFile();
+
+            },1000);
+
+        }
+    };
+
+    dataChannel.onclose =
+    ()=>{
+
+        addLog(
+        "DataChannel CLOSED"
+        );
+
+        setStatus(
+        "Đã ngắt kết nối",
+        "#ef4444"
+        );
+    };
+
+    dataChannel.onerror =
+    (err)=>{
+
+        console.error(err);
+
+        addLog(
+        "Lỗi DataChannel"
+        );
+    };
+
+    dataChannel.onmessage =
+    handleIncomingData;
+}
+
+// =====================================================
+// RECEIVE
+// =====================================================
+
+function handleIncomingData(
+event
+){
+
+    if(
+        typeof event.data
+        === "string"
+    ){
+
+        const msg =
+        JSON.parse(
+            event.data
+        );
+
+        if(
+            msg.type ===
+            "metadata"
+        ){
+
+            expectedFileName =
+            msg.name;
+
+            expectedFileSize =
+            msg.size;
+
+            receiveBuffers =
+            [];
+
+            receiveSize = 0;
+
+            transferMode
+            .textContent =
+            "Nhận";
+
+            addLog(
+            `Nhận file: ${msg.name}`
+            );
+
+            return;
         }
 
-        // --- 5. FILE SENDING WITH CHUNKING ---
-        function sendFileInChunks(conn, file) {
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-            let currentChunk = 0;
-            
-            // Send metadata first
-            conn.send({
-                type: 'metadata',
-                name: file.name,
-                size: file.size,
-                fileType: file.type,
-                totalChunks: totalChunks
-            });
+        if(
+            msg.type ===
+            "complete"
+        ){
 
-            const fileReader = new FileReader();
-            
-            function readNextChunk() {
-                const start = currentChunk * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const slice = file.slice(start, end);
-                
-                fileReader.readAsArrayBuffer(slice);
-            }
+            finishDownload();
 
-            fileReader.onload = (e) => {
-                const buffer = e.target.result;
-                
-                conn.send({
-                    type: 'chunk',
-                    index: currentChunk,
-                    buffer: buffer
-                });
-
-                currentChunk++;
-                const percent = Math.floor((currentChunk / totalChunks) * 100);
-                updateProgressBar(percent);
-                setStatus(`Đang gửi... ${percent}%`);
-
-                if (currentChunk < totalChunks) {
-                    setTimeout(readNextChunk, 5);
-                } else {
-                    setStatus("Đã gửi file thành công!");
-                }
-            };
-
-            fileReader.onerror = () => {
-                setStatus("Lỗi đọc file.");
-            };
-
-            progressSection.classList.add('active');
-            readNextChunk();
+            return;
         }
 
-        // --- 6. UTILITIES ---
-        function updateProgressBar(percent) {
-            progressBar.style.width = percent + "%";
-            statusPercent.textContent = percent + "%";
+        return;
+    }
+
+    receiveBuffers.push(
+        event.data
+    );
+
+    receiveSize +=
+    event.data.byteLength;
+
+    updateReceiveProgress();
+}
+
+// =====================================================
+// RECEIVE PROGRESS
+// =====================================================
+
+function updateReceiveProgress(){
+
+    if(
+        !expectedFileSize
+    ) return;
+
+    const percent =
+    Math.floor(
+
+        receiveSize
+        /
+        expectedFileSize
+        *
+        100
+
+    );
+
+    progressBar.style.width =
+    percent + "%";
+
+    progressPercent.textContent =
+    percent + "%";
+
+    transferSize.textContent =
+
+    formatSize(
+        receiveSize
+    )
+
+    + " / " +
+
+    formatSize(
+        expectedFileSize
+    );
+}
+
+// =====================================================
+// DOWNLOAD
+// =====================================================
+
+function finishDownload(){
+
+    const blob =
+    new Blob(
+        receiveBuffers
+    );
+
+    const url =
+    URL.createObjectURL(
+        blob
+    );
+
+    const a =
+    document.createElement(
+        "a"
+    );
+
+    a.href = url;
+
+    a.download =
+    expectedFileName;
+
+    a.click();
+
+    URL.revokeObjectURL(
+        url
+    );
+
+    progressBar.style.width =
+    "100%";
+
+    progressPercent.textContent =
+    "100%";
+
+    addLog(
+    "Tải file hoàn tất"
+    );
+
+    showToast(
+    "Đã nhận file"
+    );
+
+    setStatus(
+    "Nhận thành công",
+    "#22c55e"
+    );
+	
+	setTimeout(async()=>{
+
+    await cleanupRoom();
+
+    resetTransfer();
+
+},5000);
+
+}
+
+// =====================================================
+// SEND FILE
+// =====================================================
+
+async function sendFile(){
+
+    if(
+        !selectedFile
+    ) return;
+
+    transferMode
+    .textContent =
+    "Gửi";
+
+    transferStartTime =
+    Date.now();
+
+    dataChannel.send(
+
+        JSON.stringify({
+
+            type:"metadata",
+
+            name:
+            selectedFile.name,
+
+            size:
+            selectedFile.size
+
+        })
+
+    );
+
+    addLog(
+    "Bắt đầu gửi..."
+    );
+
+    const chunkSize =
+    64 * 1024;
+
+    let offset = 0;
+
+    while(
+        offset <
+        selectedFile.size
+    ){
+
+        const slice =
+        selectedFile.slice(
+            offset,
+            offset +
+            chunkSize
+        );
+
+        const buffer =
+        await slice.arrayBuffer();
+
+        dataChannel.send(
+            buffer
+        );
+
+        offset +=
+        buffer.byteLength;
+
+        updateSendProgress(
+            offset,
+            selectedFile.size
+        );
+
+        while(
+            dataChannel
+            .bufferedAmount >
+            4 * 1024 * 1024
+        ){
+
+            await new Promise(
+                r =>
+                setTimeout(
+                    r,
+                    50
+                )
+            );
+        }
+    }
+
+    dataChannel.send(
+
+        JSON.stringify({
+
+            type:"complete"
+
+        })
+
+    );
+
+    addLog(
+    "Gửi hoàn tất"
+    );
+
+    showToast(
+    "Đã gửi xong"
+    );
+
+    setStatus(
+    "Gửi thành công",
+    "#22c55e"
+    );
+	
+	setTimeout(async()=>{
+
+    await cleanupRoom();
+
+    resetTransfer();
+
+},5000);
+
+}
+
+// =====================================================
+// SEND PROGRESS
+// =====================================================
+
+function updateSendProgress(
+sent,
+total
+){
+
+    const percent =
+    Math.floor(
+        sent /
+        total *
+        100
+    );
+
+    progressBar.style.width =
+    percent + "%";
+
+    progressPercent.textContent =
+    percent + "%";
+
+    transferSize.textContent =
+
+    formatSize(sent)
+
+    + " / " +
+
+    formatSize(total);
+
+    const elapsed =
+
+    (
+        Date.now()
+        -
+        transferStartTime
+    )
+    /1000;
+
+    const speed =
+    sent /
+    elapsed;
+
+    transferSpeed.textContent =
+
+    formatSize(speed)
+    + "/s";
+
+    const remain =
+    (
+        total - sent
+    )
+    /
+    Math.max(
+        speed,
+        1
+    );
+
+    remainingTime.textContent =
+    formatTime(
+        remain
+    );
+}
+
+// =====================================================
+// HELPERS
+// =====================================================
+
+function formatSize(
+bytes
+){
+
+    if(
+        bytes <
+        1024
+    ) return bytes+" B";
+
+    if(
+        bytes <
+        1024*1024
+    ){
+
+        return (
+            bytes/1024
+        ).toFixed(1)
+        +" KB";
+    }
+
+    if(
+        bytes <
+        1024*1024*1024
+    ){
+
+        return (
+            bytes/
+            1024/
+            1024
+        ).toFixed(1)
+        +" MB";
+    }
+
+    return (
+        bytes/
+        1024/
+        1024/
+        1024
+    ).toFixed(1)
+    +" GB";
+}
+
+function formatTime(
+sec
+){
+
+    sec =
+    Math.floor(sec);
+
+    const m =
+    Math.floor(
+        sec/60
+    );
+
+    const s =
+    sec % 60;
+
+    return (
+        m+"m "
+        +s+"s"
+    );
+}
+
+
+// =====================================================
+// CONNECTION TIMEOUT
+// =====================================================
+
+let connectionTimeout = null;
+
+function startConnectionTimeout(){
+
+    clearConnectionTimeout();
+
+    connectionTimeout =
+    setTimeout(()=>{
+
+        if(
+            !peerConnection ||
+            peerConnection.connectionState !==
+            "connected"
+        ){
+
+            setStatus(
+            "Hết thời gian kết nối",
+            "#ef4444"
+            );
+
+            showToast(
+            "Không thể kết nối"
+            );
+
+            addLog(
+            "Connection timeout"
+            );
         }
 
-        function setStatus(msg) {
-            statusText.textContent = msg;
-            console.log("[Status]", msg);
+    },30000);
+
+}
+
+function clearConnectionTimeout(){
+
+    if(connectionTimeout){
+
+        clearTimeout(
+            connectionTimeout
+        );
+
+        connectionTimeout = null;
+    }
+}
+
+// =====================================================
+// ROOM CLEANUP
+// =====================================================
+
+async function cleanupRoom(){
+
+    try{
+
+        if(roomId){
+
+            await remove(
+                ref(
+                    db,
+                    `rooms/${roomId}`
+                )
+            );
+
+            addLog(
+            "Đã xóa phòng"
+            );
         }
 
-        function formatBytes(bytes, decimals = 2) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const dm = decimals < 0 ? 0 : decimals;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-        }
+    }catch(err){
 
-        // Start
-        initPeer();
+        console.error(err);
+    }
+}
+
+// =====================================================
+// MEMORY CLEANUP
+// =====================================================
+
+function resetTransfer(){
+
+    receiveBuffers = [];
+
+    receiveSize = 0;
+
+    expectedFileSize = 0;
+
+    expectedFileName = "";
+
+    progressBar.style.width =
+    "0%";
+
+    progressPercent.textContent =
+    "0%";
+
+    transferSize.textContent =
+    "0 MB";
+
+    transferSpeed.textContent =
+    "0 MB/s";
+
+    remainingTime.textContent =
+    "--";
+
+    transferMode.textContent =
+    "Idle";
+}
+
+
+// =====================================================
+// PAGE CLOSE
+// =====================================================
+
+window.addEventListener(
+"beforeunload",
+async()=>{
+
+    try{
+
+        await cleanupRoom();
+
+    }catch(err){
+
+    }
+
+});
+
+
+// =====================================================
+// APP START
+// =====================================================
+
+addLog(
+"Firebase Ready"
+);
+
+addLog(
+"WebRTC Ready"
+);
+
+setStatus(
+"Sẵn sàng",
+"#22c55e"
+);
+
+resetTransfer();
+
