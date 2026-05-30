@@ -1,7 +1,6 @@
 // --- 1. CHẶN CHUỘT PHẢI CẤP ĐỘ TRÌNH DUYỆT & PHÍM TẮT F12/QUÉT KHỐI ---
 document.addEventListener('contextmenu', event => event.preventDefault());
 document.addEventListener('keydown', (e) => {
-    // Chặn F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+Shift+J, Ctrl+U
     if (e.key === 'F12' || 
         (e.ctrlKey && e.shiftKey && ['I', 'C', 'J'].includes(e.key.toUpperCase())) || 
         (e.ctrlKey && e.key.toUpperCase() === 'U')) {
@@ -32,13 +31,9 @@ const progressBar = document.getElementById('progress-bar');
 
 // --- 2. CẤU HÌNH PEERJS + TỐI ƯU XUYÊN TƯỜNG LỬA (STUN GOOGLE) ---
 function initPeerWithRetry() {
-    // Sinh ngẫu nhiên chuỗi 6 chữ số ban đầu
     const random6Digits = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Tích hợp chữ "C" cố định vào đầu chuỗi mã định danh hiển thị công khai
     myShortCode = "C" + random6Digits; 
     
-    // Khởi tạo thực thể mạng Peer với cấu trúc ID hoàn chỉnh
     peer = new Peer(APP_PREFIX + myShortCode, {
         config: {
             'iceServers': [
@@ -46,16 +41,15 @@ function initPeerWithRetry() {
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' }
             ]
-        }
+        },
+        debug: 1 // Chỉ hiện lỗi nghiêm trọng để tối ưu hiệu năng
     });
 
-    // Xác nhận đăng ký ID thành công với hệ thống định tuyến toàn cầu
     peer.on('open', (id) => {
         myIdEl.innerText = myShortCode;
         console.log("Hệ thống kết nối thành công với ID ngầm: " + id);
     });
 
-    // Cơ chế xử lý lỗi và tự động đổi mã mới nếu xảy ra xung đột ID ngẫu nhiên
     peer.on('error', (err) => {
         console.error("Lỗi hệ thống: ", err.type);
         if (err.type === 'unavailable-id') {
@@ -65,10 +59,35 @@ function initPeerWithRetry() {
         }
     });
 
-    // LẮNG NGHE YÊU CẦU KẾT NỐI TỪ THIẾT BỊ NHẬN (DÀNH CHO PHÍA GỬI)
+    // XỬ LÝ DÀNH CHO PHÍA GỬI: Lắng nghe khi có máy nhận chủ động kết nối tới
     peer.on('connection', (conn) => {
         connection = conn;
-        setupConnectionListeners();
+        
+        // Kích hoạt khu vực hiển thị tiến trình trên máy gửi
+        progressSection.classList.add('active');
+        statusText.innerText = "Đang kết nối với thiết bị nhận...";
+
+        // Khi kênh truyền thực sự thông suốt, máy gửi chủ động đẩy file đi ngay lập tức
+        connection.on('open', () => {
+            if (selectedFile) {
+                statusText.innerText = "Đang truyền file...";
+                
+                connection.send({
+                    name: selectedFile.name,
+                    size: selectedFile.size,
+                    type: selectedFile.type,
+                    data: selectedFile
+                });
+                
+                simulateProgress();
+            } else {
+                statusText.innerText = "Kết nối lỗi: Chưa chọn file cần gửi!";
+            }
+        });
+
+        connection.on('close', () => {
+            statusText.innerText = "Kết nối đã ngắt.";
+        });
     });
 }
 
@@ -80,7 +99,6 @@ fileInput.addEventListener('change', (e) => {
         selectedFile = e.target.files[0];
         fileInfo.innerText = `${selectedFile.name} (${formatBytes(selectedFile.size)})`;
         
-        // Kích hoạt hiển thị giao diện mã ghép cặp bảo mật dạng Cxxxxxx
         generatedCodeEl.innerText = myShortCode;
         codeBox.style.display = "block";
     }
@@ -89,11 +107,8 @@ fileInput.addEventListener('change', (e) => {
 // --- 4. XỬ LÝ LOGIC PHÍA NHẬN FILE ---
 connectBtn.addEventListener('click', () => {
     let code = receiveInput.value.trim();
-    
-    // Tự động chuẩn hóa chữ thường thành chữ hoa (ví dụ: c112233 -> C112233)
     code = code.toUpperCase(); 
 
-    // Kiểm tra tính hợp lệ của định dạng mã: Phải dài 7 ký tự, bắt đầu bằng 'C' và theo sau là số
     if (code.length !== 7 || !code.startsWith('C') || isNaN(code.substring(1))) {
         alert("Vui lòng nhập đúng định dạng mã nhận file! (Ví dụ: C112233)");
         return;
@@ -102,50 +117,28 @@ connectBtn.addEventListener('click', () => {
     statusText.innerText = "Đang kết nối từ xa...";
     progressSection.classList.add('active');
 
-    // Thiết lập kênh truyền dữ liệu an toàn đến máy chủ Peer đích thông qua mã định danh đầy đủ
+    // Thiết lập kết nối từ máy nhận sang máy gửi
     connection = peer.connect(APP_PREFIX + code, {
         reliable: true
     });
     
-    setupConnectionListeners();
-});
-
-// --- 5. GIÁM SÁT TIẾN TRÌNH TRUYỀN TẢI FILE DỮ LIỆU SỬ DỤNG WEBRTC ---
-function setupConnectionListeners() {
+    // XỬ LÝ DÀNH CHO PHÍA NHẬN: Lắng nghe luồng dữ liệu đổ về
     connection.on('open', () => {
-        progressSection.classList.add('active');
-        
-        // Kiểm tra vai trò: Nếu tồn tại bộ nhớ đệm file => Đây là máy phát dữ liệu đi
-        if (selectedFile) {
-            statusText.innerText = "Đang truyền file...";
-            
-            // Tiến hành ép kiểu và truyền mảng dữ liệu thô nhị phân trực tiếp (P2P DataChannel)
-            connection.send({
-                name: selectedFile.name,
-                size: selectedFile.size,
-                type: selectedFile.type,
-                data: selectedFile
-            });
-            
-            simulateProgress();
-        } else {
-            statusText.innerText = "Đang đợi phản hồi file...";
-        }
+        statusText.innerText = "Đang kết nối thành công! Chờ nhận dữ liệu...";
+        updateProgressBar(10);
     });
 
     connection.on('data', (data) => {
-        // Nhận luồng dữ liệu nhị phân từ kênh truyền trực tiếp (Dành cho máy nhận)
         if (data && data.data) {
             statusText.innerText = "Đang tải dữ liệu về...";
-            updateProgressBar(50); // Đánh dấu hoàn tất nhận luồng dữ liệu thô
+            updateProgressBar(60); 
 
-            // Tái cấu trúc gói tin thô thành định dạng File gốc của hệ thống
+            // Chuyển mảng dữ liệu thô thành file gốc và kích hoạt tải về máy
             const blob = new Blob([data.data], { type: data.type });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = data.name;
             
-            // Cập nhật trạng thái đồ họa lên mức tối đa và kích hoạt lệnh lưu file trên trình duyệt
             updateProgressBar(100);
             statusText.innerText = "Đã nhận thành công!";
             link.click();
@@ -155,15 +148,14 @@ function setupConnectionListeners() {
     connection.on('close', () => {
         statusText.innerText = "Kết nối đã ngắt.";
     });
-}
+});
 
-// Hàm xử lý đồ họa thanh tiến trình % trực quan
+// --- 5. CÁC HÀM TIỆN ÍCH HỖ TRỢ ĐỒ HỌA GIAO DIỆN ---
 function updateProgressBar(percent) {
     progressBar.style.width = percent + "%";
     statusPercent.innerText = percent + "%";
 }
 
-// Đồng bộ hóa trạng thái giả lập cho tiến trình gửi dữ liệu băng thông rộng
 function simulateProgress() {
     let current = 0;
     const interval = setInterval(() => {
@@ -171,14 +163,15 @@ function simulateProgress() {
         if (current <= 90) {
             updateProgressBar(current);
         }
-        if (current >= 100 && statusText.innerText === "Đã nhận thành công!") {
-            updateProgressBar(100);
+        // Khi máy gửi đẩy xong lên luồng dữ liệu, tự treo ở mức 95% đợi máy nhận báo hoàn tất
+        if (current >= 100) {
+            updateProgressBar(95);
+            statusText.innerText = "Đã gửi dữ liệu đi!";
             clearInterval(interval);
         }
-    }, 150);
+    }, 80);
 }
 
-// Hàm bổ trợ tính toán và hiển thị đơn vị dung lượng file hệ thống một cách chính xác
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
