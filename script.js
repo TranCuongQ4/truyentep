@@ -108,7 +108,7 @@ let transferStartTime = 0;
 
 
 // =====================================================
-// ICE SERVERS
+// ICE SERVERS (Bổ sung thêm danh sách STUN để tránh lỗi Failed)
 // =====================================================
 
 const rtcConfig = {
@@ -118,11 +118,16 @@ const rtcConfig = {
         {
             urls: [
                 "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302"
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+                "stun:stun.services.mozilla.com"
             ]
         }
 
-    ]
+    ],
+    iceCandidatePoolSize: 10
 };
 
 
@@ -224,14 +229,16 @@ fileInput.addEventListener(
 });
 
 // =====================================================
-// QR CODE
+// QR CODE (Sửa lỗi định nghĩa bằng cách nạp động module)
 // =====================================================
 
 async function createQRCode(code){
 
     try{
-
-        await QRCode.toCanvas(
+        // Import động để tránh lỗi thư viện chưa sẵn sàng từ HTML
+        const { default: QRCodeLib } = await import("https://cdn.jsdelivr.net/npm/@qkrr/qrcode-esm@1.0.1/+esm");
+        
+        await QRCodeLib.toCanvas(
             qrCanvas,
             code,
             {
@@ -241,8 +248,16 @@ async function createQRCode(code){
         );
 
     }catch(err){
-
-        console.error(err);
+        // Phương án dự phòng nếu module CDN lỗi: Sử dụng thư viện gốc hoặc log lỗi
+        try {
+            if (typeof QRCode !== 'undefined') {
+                await QRCode.toCanvas(qrCanvas, code, { width: 180, margin: 1 });
+            } else {
+                addLog("Không thể tải thư viện QR Code, bỏ qua tạo ảnh QR.");
+            }
+        } catch(e) {
+            console.error(e);
+        }
     }
 }
 
@@ -275,7 +290,8 @@ async () => {
     roomCode.textContent =
     roomId;
 
-    await createQRCode(roomId);
+    // Chạy tạo QR code độc lập không gây nghẽn WebRTC
+    createQRCode(roomId).catch(e => console.log(e));
 
     setStatus(
     "Đang tạo phòng..."
@@ -1048,7 +1064,7 @@ async function sendFile(){
     );
 
     const chunkSize =
-    64 * 1024;
+    16 * 1024; // Giảm bớt kích thước để truyền tải mượt mà qua các mạng nội bộ
 
     let offset = 0;
 
@@ -1082,14 +1098,14 @@ async function sendFile(){
         while(
             dataChannel
             .bufferedAmount >
-            4 * 1024 * 1024
+            1024 * 1024
         ){
 
             await new Promise(
                 r =>
                 setTimeout(
                     r,
-                    50
+                    30
                 )
             );
         }
@@ -1408,4 +1424,3 @@ setStatus(
 );
 
 resetTransfer();
-
