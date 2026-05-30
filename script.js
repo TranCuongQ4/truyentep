@@ -103,6 +103,9 @@ let expectedFileName = "";
 
 let transferStartTime = 0;
 
+// Thêm biến cờ kiểm soát để tránh lắng nghe trùng lặp Answer từ Firebase
+let unsubscribeAnswer = null; 
+
 
 // =====================================================
 // ICE SERVERS (Cấu hình STUN của Google tối ưu kết nối Internet)
@@ -312,18 +315,22 @@ async function createSenderPeer(){
         if(!event.candidate)
             return;
 
-        const candidateRef =
-        push(
-            ref(
-                db,
-                `rooms/${roomId}/offerCandidates`
-            )
-        );
+            try {
+                const candidateRef =
+                push(
+                    ref(
+                        db,
+                        `rooms/${roomId}/offerCandidates`
+                    )
+                );
 
-        await set(
-            candidateRef,
-            event.candidate.toJSON()
-        );
+                await set(
+                    candidateRef,
+                    event.candidate.toJSON()
+                );
+            } catch (e) {
+                console.error("Lỗi gửi ICE:", e);
+            }
     };
 
 
@@ -362,7 +369,7 @@ async function createSenderPeer(){
 }
 
 // =====================================================
-// LISTEN ANSWER
+// LISTEN ANSWER (Sửa lỗi chặn trùng lặp trạng thái stable)
 // =====================================================
 
 function listenForAnswer(){
@@ -373,7 +380,8 @@ function listenForAnswer(){
         `rooms/${roomId}`
     );
 
-    onValue(
+    // Lưu lại hàm hủy đăng ký sự kiện lắng nghe để hủy kích hoạt khi nhận được Answer hợp lệ
+    unsubscribeAnswer = onValue(
         roomRef,
         async(snapshot)=>{
 
@@ -387,31 +395,30 @@ function listenForAnswer(){
                 return;
             }
 
+            // KIỂM TRA CHẶN: Nếu kết nối đã có RemoteDescription hoặc trạng thái đã ổn định thì bỏ qua luôn
             if(
-                peerConnection
-                .currentRemoteDescription
+                peerConnection.currentRemoteDescription || 
+                peerConnection.signalingState === "stable"
             ){
                 return;
             }
 
-            await peerConnection
-            .setRemoteDescription(
+            try {
+                // Hủy lắng nghe trên Firebase ngay lập tức để tránh nhận sự kiện rác lặp lại
+                if(unsubscribeAnswer) {
+                    unsubscribeAnswer();
+                    unsubscribeAnswer = null;
+                }
 
-                new RTCSessionDescription(
-                    data.answer
-                )
+                await peerConnection.setRemoteDescription(
+                    new RTCSessionDescription(data.answer)
+                );
 
-            );
-
-            addLog(
-            "Người nhận đã kết nối"
-            );
-
-            setStatus(
-            "Đã kết nối",
-            "#22c55e"
-            );
-
+                addLog("Người nhận đã kết nối");
+                setStatus("Đã kết nối", "#22c55e");
+            } catch (err) {
+                console.error("Lỗi setRemoteDescription của Sender:", err);
+            }
         }
     );
 
@@ -433,16 +440,13 @@ function listenForAnswer(){
                     child.val();
 
                     try{
-
-                        await peerConnection
-                        .addIceCandidate(
-                            new RTCIceCandidate(
-                                candidate
-                            )
-                        );
-
+                        // Chỉ thêm candidate khi remote description đã được thiết lập xong xuôi
+                        if (peerConnection.remoteDescription) {
+                            await peerConnection.addIceCandidate(
+                                new RTCIceCandidate(candidate)
+                            );
+                        }
                     }catch(err){
-
                         console.error(err);
                     }
 
@@ -571,18 +575,22 @@ async function joinAsReceiver(){
         if(!event.candidate)
             return;
 
-        const candidateRef =
-        push(
-            ref(
-                db,
-                `rooms/${roomId}/answerCandidates`
-            )
-        );
+            try {
+                const candidateRef =
+                push(
+                    ref(
+                        db,
+                        `rooms/${roomId}/answerCandidates`
+                    )
+                );
 
-        await set(
-            candidateRef,
-            event.candidate.toJSON()
-        );
+                await set(
+                    candidateRef,
+                    event.candidate.toJSON()
+                );
+            } catch (e) {
+                console.error("Lỗi gửi ICE của Receiver:", e);
+            }
     };
 
     await peerConnection
@@ -660,18 +668,12 @@ function listenOfferCandidates(){
                     child.val();
 
                     try{
-
-                        await peerConnection
-                        .addIceCandidate(
-
-                            new RTCIceCandidate(
-                                candidate
-                            )
-
-                        );
-
+                        if (peerConnection.remoteDescription) {
+                            await peerConnection.addIceCandidate(
+                                new RTCIceCandidate(candidate)
+                            );
+                        }
                     }catch(err){
-
                         console.error(err);
                     }
 
@@ -1345,6 +1347,11 @@ function resetTransfer(){
 
     transferMode.textContent =
     "Idle";
+    
+    if(unsubscribeAnswer) {
+        unsubscribeAnswer();
+        unsubscribeAnswer = null;
+    }
 }
 
 
