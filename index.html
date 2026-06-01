@@ -13,6 +13,10 @@
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
 </head>
 
 <body>
@@ -55,7 +59,7 @@
 
         <div class="input-group">
 
-            <label for="fileInput" class="btn btn-file-3d">
+            <label for="fileInput" class="file-label-btn">
                 📁 Chọn File Cần Gửi
             </label>
 
@@ -92,7 +96,7 @@
             </div>
 
             <div id="qrArea" class="qr-container" style="display: none;">
-                <img id="qrImage" src="" alt="Mã QR kết nối">
+                <div id="qrcode"></div>
                 <div class="qr-hint">Quét mã để nhận file nhanh</div>
             </div>
 
@@ -121,6 +125,12 @@
             id="joinRoomBtn"
             class="btn btn-success">
             Kết Nối Nhận File
+        </button>
+
+        <button
+            id="openScanBtn"
+            class="btn btn-scan">
+            📷 Quét QR Nhận Nhanh
         </button>
 
     </div>
@@ -234,6 +244,20 @@
         Thiết Kế Trần Cường - Zalo: 0907860662
     </div>
 
+</div>
+
+<div id="scannerModal" class="scanner-modal">
+    <div class="scanner-content">
+        <div class="scanner-header">
+            <h3>Quét Mã QR Nhận File</h3>
+            <button id="closeScanBtn" class="close-scan-btn">&times;</button>
+        </div>
+        <div class="scanner-view-wrapper">
+            <div id="scannerReader"></div>
+            <div class="scanner-laser-line"></div>
+        </div>
+        <div class="scanner-footer-hint">Hướng camera về phía mã QR Code phòng gửi</div>
+    </div>
 </div>
 
 <div

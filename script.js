@@ -49,7 +49,11 @@ const transferMode = document.getElementById("transferMode");
 const logBox = document.getElementById("logBox");
 const toast = document.getElementById("toast");
 const qrArea = document.getElementById("qrArea");
-const qrImage = document.getElementById("qrImage");
+
+// Các phần tử điều khiển bộ quét mã QR Camera
+const openScanBtn = document.getElementById("openScanBtn");
+const closeScanBtn = document.getElementById("closeScanBtn");
+const scannerModal = document.getElementById("scannerModal");
 
 // =====================================================
 // GLOBAL VARIABLES
@@ -58,13 +62,15 @@ let selectedFile = null;
 let roomId = null;
 let isSender = false;
 let peerConnection = null;
+let qrInstance = null; 
+let html5QrcodeScanner = null; // Quản lý camera máy quét QR
 
 // Cấu hình truyền đa luồng (SCTP Multi-Channel)
 const numChannels = 3; 
 let dataChannels = [];
 let openChannelsCount = 0;
 
-// Bộ đệm xử lý ghép tệp tin đa luồng nhận về
+// Bộ đệm xử lý ghép dữ liệu nhị phân nhận về
 let receiveBuffers = {}; 
 let receivedChunksCount = 0;
 let totalExpectedChunks = 0;
@@ -74,13 +80,11 @@ let expectedFileName = "";
 let transferStartTime = 0;
 let unsubscribeAnswer = null;
 
-const chunkSize = 16 * 1024; // Khối 16KB tối ưu dữ liệu mạng
+const chunkSize = 16 * 1024; // Khối chunk dữ liệu tối ưu 16KB
 
 const rtcConfig = {
     iceServers: [
-        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
-        { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-        { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" }
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302", "stun:stun4.l.google.com:19302"] }
     ],
     iceCandidatePoolSize: 10
 };
@@ -117,25 +121,108 @@ function generateRoomCode(){
 }
 
 // =====================================================
-// AUTOMATIC QR CODE CONNECTION LOGIC
+// AUTOMATIC QR CODE GENERATION WITH CDN
 // =====================================================
 function generateRoomQR(code) {
     const currentUrl = window.location.href.split('?')[0];
     const connectUrl = `${currentUrl}?room=${code}`;
     
-    // Sử dụng API Google Charts an toàn để dựng ảnh mã QR
-    qrImage.src = `https://chart.googleapis.com/chart?cht=qr&chs=180x180&chl=${encodeURIComponent(connectUrl)}&choe=UTF-8`;
+    const qrContainer = document.getElementById("qrcode");
+    qrContainer.innerHTML = ""; 
+    
+    qrInstance = new QRCode(qrContainer, {
+        text: connectUrl,
+        width: 140,
+        height: 140,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+    });
+
     qrArea.style.display = "block";
-    addLog("Đã tạo liên kết quét mã QR chia sẻ nhanh");
+    addLog("Đã khởi tạo đồ hoạ mã QR chia sẻ nhanh thành công");
 }
 
 function checkURLParameters() {
     const urlParams = new URLSearchParams(window.location.search);
     const roomFromUrl = urlParams.get('room');
     if (roomFromUrl && roomFromUrl.length === 6) {
-        roomInput.value = roomFromUrl.toUpperCase();
-        addLog(`Đã tự động bắt được mã phòng từ QR: ${roomFromUrl}`);
-        setTimeout(() => { joinRoomBtn.click(); }, 800);
+        processAutoJoin(roomFromUrl);
+    }
+}
+
+function processAutoJoin(code) {
+    roomInput.value = code.toUpperCase();
+    addLog(`Hệ thống tự động nạp mã phòng nhận diện được: ${code}`);
+    setTimeout(() => { joinRoomBtn.click(); }, 800);
+}
+
+// =====================================================
+// CAMERA QR SCANNER ENGINE (LIVE CAM)
+// =====================================================
+openScanBtn.addEventListener("click", () => {
+    scannerModal.classList.add("active");
+    addLog("Đang xin quyền truy cập Camera để quét mã QR...");
+    
+    // Khởi tạo engine quét camera nội cục bộ
+    if (!html5QrcodeScanner) {
+        html5QrcodeScanner = new Html5Qrcode("scannerReader");
+    }
+
+    const config = { fps: 15, qrbox: { width: 220, height: 220 } };
+
+    // Kích hoạt camera mặt sau điện thoại (environment)
+    html5QrcodeScanner.start(
+        { facingMode: "environment" },
+        config,
+        (qrCodeMessage) => {
+            // Callback khi quét trúng mã QR thành công
+            addLog("Đã quét thành công dữ liệu QR!");
+            stopQrScanner();
+            
+            try {
+                // Phân tích cú pháp lấy mã phòng từ URL hoặc lấy trực tiếp chuỗi text gốc 6 ký tự
+                let targetCode = "";
+                if (qrCodeMessage.includes("?room=")) {
+                    const urlObj = new URL(qrCodeMessage);
+                    targetCode = urlObj.searchParams.get("room");
+                } else {
+                    targetCode = qrCodeMessage.trim();
+                }
+
+                if (targetCode && targetCode.length === 6) {
+                    showToast(`Quét thành công phòng: ${targetCode}`);
+                    processAutoJoin(targetCode);
+                } else {
+                    showToast("Mã QR không đúng định dạng phòng truyền file");
+                    addLog("Dữ liệu QR không khớp cấu trúc 6 ký tự hệ thống.");
+                }
+            } catch (err) {
+                console.error("Lỗi bóc tách QR:", err);
+                showToast("Lỗi giải mã QR");
+            }
+        },
+        (errorMessage) => {
+            // Bỏ qua lỗi quét trượt từng khung hình để giữ ứng dụng mượt mà
+        }
+    ).catch((err) => {
+        console.error("Không mở được camera:", err);
+        addLog("Thất bại! Vui lòng cấp quyền Camera cho trình duyệt.");
+        showToast("Không mở được Camera");
+        scannerModal.classList.remove("active");
+    });
+});
+
+closeScanBtn.addEventListener("click", () => {
+    stopQrScanner();
+});
+
+function stopQrScanner() {
+    scannerModal.classList.remove("active");
+    if (html5QrcodeScanner && html5QrcodeScanner.isScanning) {
+        html5QrcodeScanner.stop().then(() => {
+            addLog("Đã tắt luồng Camera thiết bị an toàn");
+        }).catch(err => console.error(err));
     }
 }
 
@@ -162,7 +249,6 @@ createRoomBtn.addEventListener("click", async () => {
     roomId = generateRoomCode();
     roomCode.textContent = roomId;
     
-    // Khởi tạo mã QR để thiết bị khác quét nhanh
     generateRoomQR(roomId);
 
     setStatus("Đang tạo phòng...");
@@ -182,7 +268,6 @@ async function createSenderPeer(){
     dataChannels = [];
     openChannelsCount = 0;
 
-    // Thiết lập hệ thống đa luồng truyền song song
     for (let i = 0; i < numChannels; i++) {
         const channel = peerConnection.createDataChannel(`fileTransfer_${i}`, { ordered: true });
         channel.binaryType = "arraybuffer";
@@ -205,21 +290,21 @@ async function createSenderPeer(){
         offer: { type: offer.type, sdp: offer.sdp }
     });
 
-    addLog(`Đã cấu hình ${numChannels} đường truyền dữ liệu SCTP`);
+    addLog(`Đã thiết lập xong ${numChannels} luồng truyền dẫn dữ liệu SCTP`);
     listenForAnswer();
 }
 
 function setupSenderChannelEvents(channel) {
     channel.onopen = () => {
         openChannelsCount++;
-        addLog(`Luồng truyền dữ liệu [${channel.label}] kích hoạt thành công`);
+        addLog(`Luồng [${channel.label}] đã đồng bộ hoàn tất`);
         if (openChannelsCount === numChannels && isSender) {
             setStatus("Đã kết nối", "#22c55e");
             transferMode.textContent = `${numChannels} Luồng Gửi`;
             setTimeout(() => { sendFileMultiChannel(); }, 800);
         }
     };
-    channel.onclose = () => { addLog(`Luồng [${channel.label}] đã đóng`); };
+    channel.onclose = () => { addLog(`Luồng [${channel.label}] đóng`); };
     channel.onerror = (err) => { console.error(`Lỗi luồng [${channel.label}]:`, err); };
 }
 
@@ -256,9 +341,8 @@ async function sendFileMultiChannel() {
     if (!selectedFile) return;
 
     transferStartTime = Date.now();
-    addLog(`Đang tiến hành phát dữ liệu đa luồng song song...`);
+    addLog(`Đang đẩy các phân mảnh dữ liệu qua đa luồng song song...`);
 
-    // Gửi thông tin Metadata cấu trúc file qua luồng số 0
     dataChannels[0].send(JSON.stringify({
         type: "metadata",
         name: selectedFile.name,
@@ -272,16 +356,14 @@ async function sendFileMultiChannel() {
     while (offset < selectedFile.size) {
         const currentChannel = dataChannels[chunkIndex % numChannels];
 
-        // Nếu bộ đệm tràn, tạm dừng luồng chờ giải phóng bộ nhớ thiết bị
-        if (currentChannel.bufferedAmount > 2 * 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 40));
+        if (currentChannel.bufferedAmount > 1024 * 1024) {
+            await new Promise(r => setTimeout(r, 30));
             continue; 
         }
 
         const slice = selectedFile.slice(offset, offset + chunkSize);
         const buffer = await slice.arrayBuffer();
 
-        // Đóng gói mảnh dữ liệu kèm chỉ mục Header để phía nhận ráp chuẩn xác
         const packet = new Uint8Array(4 + buffer.byteLength);
         const view = new DataView(packet.buffer);
         view.setUint32(0, chunkIndex); 
@@ -295,14 +377,13 @@ async function sendFileMultiChannel() {
         updateSendProgress(offset, selectedFile.size);
     }
 
-    // Gửi tín hiệu báo hoàn tất trên tất cả các kênh
     dataChannels.forEach(chan => {
         if (chan.readyState === "open") {
             chan.send(JSON.stringify({ type: "complete" }));
         }
     });
 
-    addLog("Đã truyền xong tất cả phân đoạn file");
+    addLog("Đã chuyển phát thành công toàn bộ phân mảnh file");
     setStatus("Gửi thành công", "#22c55e");
 
     setTimeout(async () => {
@@ -348,7 +429,6 @@ async function joinAsReceiver(){
 
     peerConnection = new RTCPeerConnection(rtcConfig);
 
-    // Lắng nghe luồng truyền dữ liệu từ người gửi thiết lập sang
     peerConnection.ondatachannel = (event) => {
         const channel = event.channel;
         channel.binaryType = "arraybuffer";
@@ -382,6 +462,9 @@ async function joinAsReceiver(){
     listenOfferCandidates();
 }
 
+// =====================================================
+// RECEIVER ICES & MULTI-CHANNEL DATA HANDLING
+// =====================================================
 function listenOfferCandidates(){
     onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
         snapshot.forEach(async(child)=>{
@@ -395,9 +478,6 @@ function listenOfferCandidates(){
     });
 }
 
-// =====================================================
-// RECEIVER: MULTI-CHANNEL DATA HANDLING
-// =====================================================
 function handleIncomingMultiChannelData(event) {
     if (typeof event.data === "string") {
         const msg = JSON.parse(event.data);
@@ -409,12 +489,11 @@ function handleIncomingMultiChannelData(event) {
             receiveBuffers = {};
             receivedChunksCount = 0;
             receiveSize = 0;
-            addLog(`Đang tiếp nhận tệp đa luồng: ${msg.name}`);
+            addLog(`Bắt đầu tiếp nhận file đa luồng: ${msg.name}`);
             return;
         }
 
         if (msg.type === "complete") {
-            // Đảm bảo nhận đủ số lượng khối mới kích hoạt xử lý ghép tệp
             if (receivedChunksCount === totalExpectedChunks && totalExpectedChunks > 0) {
                 finishDownloadMultiChannel();
             }
@@ -423,7 +502,6 @@ function handleIncomingMultiChannelData(event) {
         return;
     }
 
-    // Xử lý cắt ghép khối nhị phân dựa theo định danh Header 4-byte
     const buffer = event.data;
     const view = new DataView(buffer);
     const chunkIndex = view.getUint32(0); 
@@ -442,11 +520,10 @@ function handleIncomingMultiChannelData(event) {
 }
 
 function finishDownloadMultiChannel() {
-    // Ngăn chặn kích hoạt trùng lặp khi nhận tín hiệu complete từ các kênh khác nhau
     if (totalExpectedChunks === 0) return; 
     totalExpectedChunks = 0; 
 
-    addLog("Đang liên kết toàn vẹn cấu trúc file...");
+    addLog("Đang kết nối tổ hợp cấu trúc file...");
     const sortedBuffers = [];
     const totalKeys = Object.keys(receiveBuffers).length;
     
@@ -520,7 +597,7 @@ function watchConnectionState(){
     if (!peerConnection) return;
     peerConnection.onconnectionstatechange = ()=>{
         const state = peerConnection.connectionState;
-        addLog(`Kết nối: ${state.toUpperCase()}`);
+        addLog(`Trạng thái: ${state.toUpperCase()}`);
         if(state === "connected") {
             clearConnectionTimeout();
             setStatus("Đã kết nối", "#22c55e");
@@ -552,7 +629,7 @@ async function cleanupRoom(){
     try{
         if(roomId){
             await remove(ref(db, `rooms/${roomId}`));
-            addLog("Đã dọn dẹp bộ nhớ phòng");
+            addLog("Đã dọn dẹp bộ nhớ phòng trên Firebase");
         }
     }catch(err){ console.error(err); }
 }
@@ -580,7 +657,7 @@ function resetTransfer(){
 
 window.addEventListener("beforeunload", async()=>{ try{ await cleanupRoom(); }catch(e){} });
 
-// Khởi chạy ứng dụng và bắt tham số từ liên kết QR nếu có
+// Khởi tạo tiến trình quét link QR tự động nếu có tham số đầu vào
 checkURLParameters();
 setStatus("Sẵn sàng", "#22c55e");
 resetTransfer();

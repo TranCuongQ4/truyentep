@@ -5,7 +5,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent; /* Tối ưu trải nghiệm chạm trên điện thoại */
+    -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
@@ -30,7 +30,7 @@ html, body {
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 24px;
@@ -80,14 +80,30 @@ html, body {
 .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #f1f5f9; }
 
 /* ===================================================
-   INPUTS & BUTTONS 3D MECHANIC EFFECT
+   INPUTS & BUTTONS
 =================================================== */
-.input-group { margin-bottom: 14px; width: 100%; }
-.file-name { margin-top: 10px; text-align: center; font-size: 12px; color: #cbd5e1; word-break: break-all; }
+.input-group { margin-bottom: 12px; width: 100%; }
+
+.file-label-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 12px;
+    background: #1e293b;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.file-label-btn:hover { background: #334155; border-color: #3b82f6; }
+.file-name { margin-top: 6px; text-align: center; font-size: 12px; color: #cbd5e1; word-break: break-all; }
 
 .room-input {
     width: 100%;
-    height: 46px;
+    height: 44px;
     border-radius: 12px;
     text-align: center;
     font-size: 18px;
@@ -99,84 +115,64 @@ html, body {
 }
 .room-input:focus { border-color: #22c55e; }
 
-/* --- CORE BUTTONS STYLE 3D --- */
+/* Button Controls */
 .btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
     width: 100%;
-    padding: 14px;
+    border: none;
+    cursor: pointer;
+    padding: 12px;
     border-radius: 12px;
     font-size: 14px;
     font-weight: 700;
     color: #fff;
-    border: none;
-    cursor: pointer;
-    position: relative;
-    user-select: none;
-    transition: all 0.08s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
 }
+.btn:active { transform: scale(0.98); }
+.btn-primary { background: linear-gradient(180deg, #8b5cf6, #6d28d9); box-shadow: 0 4px 12px rgba(109, 40, 217, 0.3); }
+.btn-success { background: linear-gradient(180deg, #22c55e, #15803d); box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3); margin-bottom: 8px; }
 
-/* Nút Chọn File 3D (Xám Slate) */
-.btn-file-3d {
-    background: #334155;
-    box-shadow: 0 5px 0 #1e293b, 0 8px 16px rgba(0, 0, 0, 0.4);
+/* Nút Quét QR được thiết kế riêng nền Gradient viền sáng thanh lịch */
+.btn-scan {
+    background: linear-gradient(180deg, #0284c7, #0369a1);
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
+    border: 1px solid rgba(255,255,255,0.05);
 }
-.btn-file-3d:hover { background: #475569; }
-.btn-file-3d:active {
-    transform: translateY(4px);
-    box-shadow: 0 1px 0 #1e293b, 0 2px 4px rgba(0, 0, 0, 0.4);
-}
-
-/* Nút Tạo Phòng Gửi 3D (Tím) */
-.btn-primary {
-    background: #7c3aed;
-    box-shadow: 0 5px 0 #5b21b6, 0 8px 16px rgba(124, 58, 237, 0.3);
-}
-.btn-primary:hover { background: #8b5cf6; }
-.btn-primary:active {
-    transform: translateY(4px);
-    box-shadow: 0 1px 0 #5b21b6, 0 2px 4px rgba(124, 58, 237, 0.3);
-}
-
-/* Nút Nhận File 3D (Xanh Lá) */
-.btn-success {
-    background: #16a34a;
-    box-shadow: 0 5px 0 #166534, 0 8px 16px rgba(22, 163, 74, 0.3);
-}
-.btn-success:hover { background: #22c55e; }
-.btn-success:active {
-    transform: translateY(4px);
-    box-shadow: 0 1px 0 #166534, 0 2px 4px rgba(22, 163, 74, 0.3);
-}
+.btn-scan:hover { background: linear-gradient(180deg, #0391d7, #0276b5); }
 
 /* Room Info Area & QR Style */
-.room-info { margin-top: 14px; text-align: center; background: #0f172a; padding: 12px; border-radius: 12px; }
+.room-info { margin-top: 12px; text-align: center; background: #0f172a; padding: 12px; border-radius: 12px; }
 .room-label { font-size: 11px; color: #94a3b8; }
 .room-code { font-size: 26px; font-weight: 800; color: #3b82f6; letter-spacing: 4px; margin-top: 2px; }
 
+/* Box chứa mã QR được tối ưu màu sắc hiển thị */
 .qr-container {
     margin: 14px auto 4px auto;
-    padding: 10px;
+    padding: 12px;
     background: #ffffff;
-    width: 170px;
-    height: 170px;
-    border-radius: 14px;
+    width: 164px;
+    height: 186px;
+    border-radius: 16px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
 }
-.qr-container img {
-    width: 150px;
-    height: 150px;
+.qr-container #qrcode canvas, .qr-container #qrcode img {
+    width: 140px !important;
+    height: 140px !important;
+    margin: 0 auto;
 }
 .qr-hint {
     font-size: 10px;
-    color: #94a3b8;
+    color: #64748b;
     margin-top: 8px;
-    font-weight: 600;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 /* ===================================================
@@ -226,6 +222,78 @@ html, body {
 .toast.show { opacity: 1; }
 
 /* ===================================================
+   MODAL POPUP SCANNER SETUP
+=================================================== */
+.scanner-modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(2, 6, 23, 0.92);
+    display: flex; justify-content: center; align-items: center;
+    opacity: 0; pointer-events: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10000;
+}
+.scanner-modal.active { opacity: 1; pointer-events: auto; }
+
+.scanner-content {
+    width: 340px;
+    background: #111827;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    padding: 16px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+    text-align: center;
+}
+
+.scanner-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px;
+}
+.scanner-header h3 { font-size: 15px; font-weight: 700; color: #f1f5f9; }
+
+.close-scan-btn {
+    background: #1e293b; border: none; color: #94a3b8;
+    width: 28px; height: 28px; font-size: 20px; font-weight: bold;
+    border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+.close-scan-btn:hover { background: #334155; color: #fff; }
+
+/* Khung hiển thị Camera luồng video */
+.scanner-view-wrapper {
+    position: relative;
+    width: 100%;
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+}
+#scannerReader { width: 100%; height: 100%; }
+
+/* Custom ẩn các thành phần thừa tự sinh của thư viện html5-qrcode cho đẹp */
+#scannerReader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
+#scannerReader__dashboard, #scannerReader__header { display: none !important; }
+
+/* Hiệu ứng đường kẻ Laser quét qua quét lại trên camera */
+.scanner-laser-line {
+    position: absolute;
+    top: 10%; left: 5%; width: 90%; height: 2px;
+    background: #0284c7;
+    box-shadow: 0 0 8px #0284c7;
+    animation: laserMove 2s infinite ease-in-out;
+    pointer-events: none;
+    z-index: 10;
+}
+
+@keyframes laserMove {
+    0% { top: 15%; }
+    50% { top: 85%; }
+    100% { top: 15%; }
+}
+
+.scanner-footer-hint { font-size: 11px; color: #64748b; margin-top: 12px; }
+
+/* ===================================================
    APP FOOTER STYLE
 =================================================== */
 .app-footer {
@@ -239,7 +307,6 @@ html, body {
     flex-shrink: 0;
 }
 
-/* Responsive Mobile setup */
 @media (max-width: 420px) {
     body { padding: 0; }
     .app-frame { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
