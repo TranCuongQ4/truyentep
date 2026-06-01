@@ -30,7 +30,7 @@
         </div>
 
         <div class="app-subtitle">
-            Firebase + WebRTC Secure Transfer
+            WebRTC Multi-Channel & QR Connect
         </div>
 
     </div>
@@ -50,7 +50,7 @@
     <div class="section-card">
 
         <div class="section-title">
-            📤 Gửi File
+            📤 Gửi File (Đa Luồng)
         </div>
 
         <div class="input-group">
@@ -89,6 +89,11 @@
                 id="roomCode"
                 class="room-code">
                 ------
+            </div>
+
+            <div id="qrArea" class="qr-container" style="display: none;">
+                <img id="qrImage" src="" alt="Mã QR kết nối">
+                <div class="qr-hint">Quét mã để nhận file nhanh</div>
             </div>
 
         </div>
@@ -164,7 +169,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Tốc Độ
+                    Tốc Độ (Đa Luồng)
                 </div>
 
                 <div
@@ -196,7 +201,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Loại
+                    Luồng SCTP
                 </div>
 
                 <div
@@ -214,7 +219,7 @@
     <div class="log-card">
 
         <div class="log-title">
-            Nhật Ký
+            Nhật Ký Hệ Thống
         </div>
 
         <div id="logBox" class="log-box">

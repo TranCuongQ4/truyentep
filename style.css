@@ -114,7 +114,7 @@ html, body {
     cursor: pointer;
     position: relative;
     user-select: none;
-    transition: all 0.08s ease; /* Tăng tốc phản hồi chuyển động phím bấm */
+    transition: all 0.08s ease;
 }
 
 /* Nút Chọn File 3D (Xám Slate) */
@@ -150,10 +150,34 @@ html, body {
     box-shadow: 0 1px 0 #166534, 0 2px 4px rgba(22, 163, 74, 0.3);
 }
 
-/* Room Info Area */
-.room-info { margin-top: 14px; text-align: center; background: #0f172a; padding: 10px; border-radius: 12px; }
+/* Room Info Area & QR Style */
+.room-info { margin-top: 14px; text-align: center; background: #0f172a; padding: 12px; border-radius: 12px; }
 .room-label { font-size: 11px; color: #94a3b8; }
 .room-code { font-size: 26px; font-weight: 800; color: #3b82f6; letter-spacing: 4px; margin-top: 2px; }
+
+.qr-container {
+    margin: 14px auto 4px auto;
+    padding: 10px;
+    background: #ffffff;
+    width: 170px;
+    height: 170px;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+.qr-container img {
+    width: 150px;
+    height: 150px;
+}
+.qr-hint {
+    font-size: 10px;
+    color: #94a3b8;
+    margin-top: 8px;
+    font-weight: 600;
+}
 
 /* ===================================================
    PROGRESS & STATS
@@ -208,7 +232,7 @@ html, body {
     text-align: center;
     font-size: 11px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.6); /* Màu chữ trắng mờ nhẹ sang trọng, không bị chói */
+    color: rgba(255, 255, 255, 0.6);
     padding-top: 6px;
     margin-top: 2px;
     letter-spacing: 0.3px;
