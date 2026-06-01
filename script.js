@@ -50,7 +50,6 @@ const logBox = document.getElementById("logBox");
 const toast = document.getElementById("toast");
 const qrArea = document.getElementById("qrArea");
 
-// Các phần tử điều khiển bộ quét mã QR Camera
 const openScanBtn = document.getElementById("openScanBtn");
 const closeScanBtn = document.getElementById("closeScanBtn");
 const scannerModal = document.getElementById("scannerModal");
@@ -58,12 +57,13 @@ const scannerModal = document.getElementById("scannerModal");
 // =====================================================
 // GLOBAL VARIABLES
 // =====================================================
-let selectedFile = null;
+let selectedFilesArray = []; // Mảng chứa danh sách các file gốc được chọn
+let finalZipBlob = null;      // File Zip hoàn chỉnh sau khi đóng gói nhị phân
 let roomId = null;
 let isSender = false;
 let peerConnection = null;
 let qrInstance = null; 
-let html5QrcodeScanner = null; // Quản lý camera máy quét QR
+let html5QrcodeScanner = null; 
 
 // Cấu hình truyền đa luồng (SCTP Multi-Channel)
 const numChannels = 3; 
@@ -164,24 +164,20 @@ openScanBtn.addEventListener("click", () => {
     scannerModal.classList.add("active");
     addLog("Đang xin quyền truy cập Camera để quét mã QR...");
     
-    // Khởi tạo engine quét camera nội cục bộ
     if (!html5QrcodeScanner) {
         html5QrcodeScanner = new Html5Qrcode("scannerReader");
     }
 
     const config = { fps: 15, qrbox: { width: 220, height: 220 } };
 
-    // Kích hoạt camera mặt sau điện thoại (environment)
     html5QrcodeScanner.start(
         { facingMode: "environment" },
         config,
         (qrCodeMessage) => {
-            // Callback khi quét trúng mã QR thành công
             addLog("Đã quét thành công dữ liệu QR!");
             stopQrScanner();
             
             try {
-                // Phân tích cú pháp lấy mã phòng từ URL hoặc lấy trực tiếp chuỗi text gốc 6 ký tự
                 let targetCode = "";
                 if (qrCodeMessage.includes("?room=")) {
                     const urlObj = new URL(qrCodeMessage);
@@ -202,9 +198,7 @@ openScanBtn.addEventListener("click", () => {
                 showToast("Lỗi giải mã QR");
             }
         },
-        (errorMessage) => {
-            // Bỏ qua lỗi quét trượt từng khung hình để giữ ứng dụng mượt mà
-        }
+        (errorMessage) => {}
     ).catch((err) => {
         console.error("Không mở được camera:", err);
         addLog("Thất bại! Vui lòng cấp quyền Camera cho trình duyệt.");
@@ -227,25 +221,60 @@ function stopQrScanner() {
 }
 
 // =====================================================
-// FILE SELECTION
+// FILE SELECTION (MULTI-FILE SUPPORT)
 // =====================================================
 fileInput.addEventListener("change", () => {
     if(!fileInput.files.length) return;
-    selectedFile = fileInput.files[0];
-    fileName.textContent = selectedFile.name + " (" + formatSize(selectedFile.size) + ")";
-    addLog(`Đã chọn file: ${selectedFile.name}`);
+    
+    selectedFilesArray = Array.from(fileInput.files);
+    
+    if(selectedFilesArray.length === 1) {
+        fileName.textContent = selectedFilesArray[0].name + " (" + formatSize(selectedFilesArray[0].size) + ")";
+        addLog(`Đã chọn 1 file: ${selectedFilesArray[0].name}`);
+    } else {
+        let totalBytes = selectedFilesArray.reduce((sum, f) => sum + f.size, 0);
+        fileName.innerHTML = `<span style="color:#22c55e; font-weight:700;">Danh sách chọn (${selectedFilesArray.length} file)</span><br>` + 
+                             `<span style="font-size:11px; color:#94a3b8;">Tổng dung lượng: ${formatSize(totalBytes)}</span>`;
+        addLog(`Đã chọn nhóm gồm ${selectedFilesArray.length} file.`);
+    }
 });
 
 // =====================================================
-// SENDER: CREATE ROOM
+// SENDER: CREATE ROOM & AUTO COMPRESS ZIP
 // =====================================================
 createRoomBtn.addEventListener("click", async () => {
-    if(!selectedFile || selectedFile.size === 0){
+    if(selectedFilesArray.length === 0){
         showToast("Vui lòng chọn file trước");
         return;
     }
 
     isSender = true;
+    
+    // Tiến hành đóng gói nén luồng nhị phân trực tiếp bằng bộ nhớ client
+    setStatus("Đang đóng gói dữ liệu...", "#facc15");
+    try {
+        const zip = new JSZip();
+        
+        // Đưa toàn bộ danh sách tệp tin vào bộ nhớ nén
+        selectedFilesArray.forEach(file => {
+            zip.file(file.name, file);
+        });
+        
+        // Xuất ra dạng Blob nhị phân tối ưu nén nhanh (DEFLATE)
+        finalZipBlob = await zip.generateAsync({
+            type: "blob",
+            compression: "DEFLATE",
+            compressionOptions: { level: 5 } // Cân bằng giữa tốc độ nén RAM và độ thu gọn dung lượng
+        });
+        
+        addLog(`Đóng gói Zip thành công! Dung lượng luồng đích: ${formatSize(finalZipBlob.size)}`);
+    } catch (err) {
+        console.error("Lỗi đóng gói zip:", err);
+        showToast("Lỗi nén tệp tin");
+        setStatus("Lỗi đóng gói", "#ef4444");
+        return;
+    }
+
     roomId = generateRoomCode();
     roomCode.textContent = roomId;
     
@@ -335,25 +364,29 @@ function listenForAnswer(){
 }
 
 // =====================================================
-// SENDER: MULTI-CHANNEL DATA TRANSMISSION
+// SENDER: MULTI-CHANNEL DATA TRANSMISSION (ZIP BLOB)
 // =====================================================
 async function sendFileMultiChannel() {
-    if (!selectedFile) return;
+    if (!finalZipBlob) return;
 
     transferStartTime = Date.now();
-    addLog(`Đang đẩy các phân mảnh dữ liệu qua đa luồng song song...`);
+    addLog(`Đang đẩy dữ liệu đóng gói qua đa luồng song song...`);
+
+    // Tên file hiển thị đại diện, nếu gửi nhiều file sẽ tự đặt tên có mốc thời gian rõ ràng
+    let outName = selectedFilesArray.length === 1 ? selectedFilesArray[0].name : `Gói_tệp_tin_${roomId}.zip`;
 
     dataChannels[0].send(JSON.stringify({
         type: "metadata",
-        name: selectedFile.name,
-        size: selectedFile.size,
-        totalChunks: Math.ceil(selectedFile.size / chunkSize)
+        name: outName,
+        size: finalZipBlob.size,
+        totalChunks: Math.ceil(finalZipBlob.size / chunkSize),
+        isMultiFile: selectedFilesArray.length > 1
     }));
 
     let offset = 0;
     let chunkIndex = 0;
 
-    while (offset < selectedFile.size) {
+    while (offset < finalZipBlob.size) {
         const currentChannel = dataChannels[chunkIndex % numChannels];
 
         if (currentChannel.bufferedAmount > 1024 * 1024) {
@@ -361,7 +394,7 @@ async function sendFileMultiChannel() {
             continue; 
         }
 
-        const slice = selectedFile.slice(offset, offset + chunkSize);
+        const slice = finalZipBlob.slice(offset, offset + chunkSize);
         const buffer = await slice.arrayBuffer();
 
         const packet = new Uint8Array(4 + buffer.byteLength);
@@ -374,7 +407,7 @@ async function sendFileMultiChannel() {
         offset += buffer.byteLength;
         chunkIndex++;
 
-        updateSendProgress(offset, selectedFile.size);
+        updateSendProgress(offset, finalZipBlob.size);
     }
 
     dataChannels.forEach(chan => {
@@ -463,8 +496,10 @@ async function joinAsReceiver(){
 }
 
 // =====================================================
-// RECEIVER ICES & MULTI-CHANNEL DATA HANDLING
+// RECEIVER: DATA & METADATA RECEIVE HANDLING
 // =====================================================
+let isIncomingPackMultiFile = false; // Cờ theo dõi gói nhận về có phải dạng nhiều file nén không
+
 function listenOfferCandidates(){
     onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
         snapshot.forEach(async(child)=>{
@@ -486,10 +521,11 @@ function handleIncomingMultiChannelData(event) {
             expectedFileName = msg.name;
             expectedFileSize = msg.size;
             totalExpectedChunks = msg.totalChunks;
+            isIncomingPackMultiFile = !!msg.isMultiFile;
             receiveBuffers = {};
             receivedChunksCount = 0;
             receiveSize = 0;
-            addLog(`Bắt đầu tiếp nhận file đa luồng: ${msg.name}`);
+            addLog(`Bắt đầu tiếp nhận: ${msg.name}`);
             return;
         }
 
@@ -519,11 +555,14 @@ function handleIncomingMultiChannelData(event) {
     }
 }
 
-function finishDownloadMultiChannel() {
+// =====================================================
+// RECEIVER: FINISH DOWNLOAD & AUTO EXTRACT ZIP
+// =====================================================
+async function finishDownloadMultiChannel() {
     if (totalExpectedChunks === 0) return; 
     totalExpectedChunks = 0; 
 
-    addLog("Đang kết nối tổ hợp cấu trúc file...");
+    addLog("Đang kết nối tổ hợp cấu trúc file nhị phân...");
     const sortedBuffers = [];
     const totalKeys = Object.keys(receiveBuffers).length;
     
@@ -531,24 +570,69 @@ function finishDownloadMultiChannel() {
         sortedBuffers.push(receiveBuffers[i]);
     }
 
-    const blob = new Blob(sortedBuffers);
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = expectedFileName;
-    a.click();
-    URL.revokeObjectURL(url);
+    const finalBlob = new Blob(sortedBuffers);
+
+    // Nếu chỉ gửi 1 file duy nhất và không chọn chế độ đa file, tiến hành giải nén lấy lại file gốc
+    if (isIncomingPackMultiFile) {
+        addLog("Phát hiện gói dữ liệu nén nhiều file. Tiến hành giải nén tự động...");
+        setStatus("Đang giải nén...", "#facc15");
+        try {
+            const zip = await JSZip.loadAsync(finalBlob);
+            
+            // Lặp qua từng file nằm trong tệp nén để tải xuống cục bộ
+            for (const filename of Object.keys(zip.files)) {
+                const fileData = await zip.files[filename].async("blob");
+                const fileUrl = URL.createObjectURL(fileData);
+                
+                const a = document.createElement("a");
+                a.href = fileUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(fileUrl);
+                addLog(`Đã bung file thành công: ${filename}`);
+            }
+            showToast("Đã nhận và tự động bung nhóm file hoàn tất!");
+        } catch (err) {
+            console.error("Lỗi giải nén tệp tin:", err);
+            addLog("Không thể tự giải nén gói. Tiến hành tải trực tiếp gói Zip dự phòng...");
+            downloadDirectBlob(finalBlob, expectedFileName);
+        }
+    } else {
+        // Trường hợp người gửi chỉ chọn 1 file đơn lẻ, bung zip lấy lại file ban đầu nguyên vẹn định dạng
+        try {
+            const zip = await JSZip.loadAsync(finalBlob);
+            const firstFilename = Object.keys(zip.files)[0];
+            if(firstFilename) {
+                const fileData = await zip.files[firstFilename].async("blob");
+                downloadDirectBlob(fileData, firstFilename);
+            } else {
+                downloadDirectBlob(finalBlob, expectedFileName);
+            }
+        } catch (e) {
+            downloadDirectBlob(finalBlob, expectedFileName);
+        }
+    }
 
     progressBar.style.width = "100%";
     progressPercent.textContent = "100%";
     setStatus("Nhận thành công", "#22c55e");
-    showToast("Đã tải file hoàn tất");
 
     setTimeout(async () => {
         await cleanupRoom();
         resetTransfer();
     }, 5000);
+}
+
+function downloadDirectBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Đã tải tệp hoàn tất");
 }
 
 // =====================================================
@@ -643,6 +727,9 @@ function resetTransfer(){
     receiveSize = 0;
     expectedFileSize = 0;
     expectedFileName = "";
+    selectedFilesArray = [];
+    finalZipBlob = null;
+    isIncomingPackMultiFile = false;
     
     progressBar.style.width = "0%";
     progressPercent.textContent = "0%";
@@ -651,13 +738,13 @@ function resetTransfer(){
     remainingTime.textContent = "--";
     transferMode.textContent = "Idle";
     qrArea.style.display = "none";
+    fileName.textContent = "Chưa có file nào được chọn";
     
     if(unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
 }
 
 window.addEventListener("beforeunload", async()=>{ try{ await cleanupRoom(); }catch(e){} });
 
-// Khởi tạo tiến trình quét link QR tự động nếu có tham số đầu vào
 checkURLParameters();
 setStatus("Sẵn sàng", "#22c55e");
 resetTransfer();

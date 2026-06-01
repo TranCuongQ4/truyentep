@@ -17,6 +17,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
 </head>
 
 <body>
@@ -34,7 +36,7 @@
         </div>
 
         <div class="app-subtitle">
-            WebRTC Multi-Channel & QR Connect
+            WebRTC Multi-File & QR Connect
         </div>
 
     </div>
@@ -54,24 +56,23 @@
     <div class="section-card">
 
         <div class="section-title">
-            📤 Gửi File (Đa Luồng)
+            📤 Gửi File (Hỗ Trợ Nhiều File)
         </div>
 
         <div class="input-group">
 
             <label for="fileInput" class="file-label-btn">
-                📁 Chọn File Cần Gửi
+                📁 Chọn File Cần Gửi (Có thể chọn nhiều)
             </label>
 
             <input
                 type="file"
                 id="fileInput"
                 class="file-input"
+                multiple
                 style="display: none;">
 
-            <div
-                id="fileName"
-                class="file-name">
+            <div id="fileName" class="file-name">
                 Chưa có file nào được chọn
             </div>
 
