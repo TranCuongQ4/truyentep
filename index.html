@@ -1,90 +1,238 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>App Truyền Data Trần Cường</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+
+<title>App Truyền Data Trần Cường</title>
+
+<link rel="stylesheet" href="style.css">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 </head>
+
 <body>
 
 <div class="app-frame">
+
     <div class="header-card">
-        <div class="app-icon">🚀</div>
-        <div class="app-title">App Truyền Data Trần Cường</div>
-        <div class="app-subtitle">Firebase + WebRTC Secure Transfer</div>
+
+        <div class="app-icon">
+            🚀
+        </div>
+
+        <div class="app-title">
+            App Truyền Data Trần Cường
+        </div>
+
+        <div class="app-subtitle">
+            Firebase + WebRTC Secure Transfer
+        </div>
+
     </div>
 
     <div class="status-card">
-        <div class="status-label">Trạng Thái Hệ Thống</div>
-        <div id="connectionStatus" class="status-value ready">Sẵn Sàng</div>
+
+        <div class="status-label">
+            Trạng Thái
+        </div>
+
+        <div id="connectionStatus" class="status-value ready">
+            Sẵn Sàng
+        </div>
+
     </div>
 
     <div class="section-card">
-        <div class="section-title">📤 Gửi File</div>
-        <div class="input-group">
-            <label for="fileInput" class="file-label-btn">📁 Chọn File Cần Gửi</label>
-            <input type="file" id="fileInput" class="file-input" style="display: none;">
-            <div id="fileName" class="file-name">Chưa có file nào được chọn</div>
+
+        <div class="section-title">
+            📤 Gửi File
         </div>
-        <button id="createRoomBtn" class="btn btn-primary">Tạo Phòng Gửi File</button>
+
+        <div class="input-group">
+
+            <label for="fileInput" class="btn btn-file-3d">
+                📁 Chọn File Cần Gửi
+            </label>
+
+            <input
+                type="file"
+                id="fileInput"
+                class="file-input"
+                style="display: none;">
+
+            <div
+                id="fileName"
+                class="file-name">
+                Chưa có file nào được chọn
+            </div>
+
+        </div>
+
+        <button
+            id="createRoomBtn"
+            class="btn btn-primary">
+            Tạo Phòng Gửi
+        </button>
+
         <div class="room-info">
-            <div class="room-label">Mã Phòng Của Bạn:</div>
-            <div id="roomCode" class="room-code">------</div>
+
+            <div class="room-label">
+                Mã Phòng Của Bạn:
+            </div>
+
+            <div
+                id="roomCode"
+                class="room-code">
+                ------
+            </div>
+
         </div>
+
     </div>
 
     <div class="section-card">
-        <div class="section-title">📥 Nhận File</div>
+
+        <div class="section-title">
+            📥 Nhận File
+        </div>
+
         <div class="input-group">
-            <input type="text" id="roomInput" placeholder="Nhập mã phòng 6 ký tự..." class="room-input" maxlength="6">
+
+            <input
+                type="text"
+                id="roomInput"
+                placeholder="Nhập mã phòng 6 ký tự..."
+                class="room-input"
+                maxlength="6">
+
         </div>
-        <button id="joinRoomBtn" class="btn btn-success">Kết Nối Nhận File</button>
+
+        <button
+            id="joinRoomBtn"
+            class="btn btn-success">
+            Kết Nối Nhận File
+        </button>
+
     </div>
 
-    <div class="section-card">
+    <div class="progress-card">
+
         <div class="progress-header">
-            <div class="progress-label">Tiến Trình Truyền Tải</div>
-            <div id="progressPercent" class="progress-percent">0%</div>
+
+            <div class="progress-label">
+                Tiến Trình Truyền Tải
+            </div>
+
+            <div
+                id="progressPercent"
+                class="progress-percent">
+                0%
+            </div>
+
         </div>
+
         <div class="progress-bar-bg">
-            <div id="progressBar" class="progress-bar-fill"></div>
+
+            <div
+                id="progressBar"
+                class="progress-bar-fill">
+            </div>
+
         </div>
 
         <div class="stats-grid">
+
             <div class="stat-box">
-                <div class="stat-label">Dung Lượng</div>
-                <div id="transferSize" class="stat-value">0 B / 0 B</div>
+
+                <div class="stat-label">
+                    Dung Lượng
+                </div>
+
+                <div
+                    id="transferSize"
+                    class="stat-value">
+                    0 MB
+                </div>
+
             </div>
+
             <div class="stat-box">
-                <div class="stat-label">Tốc Độ</div>
-                <div id="transferSpeed" class="stat-value">0 KB/s</div>
+
+                <div class="stat-label">
+                    Tốc Độ
+                </div>
+
+                <div
+                    id="transferSpeed"
+                    class="stat-value">
+                    0 MB/s
+                </div>
+
             </div>
+
         </div>
 
         <div class="stats-grid">
+
             <div class="stat-box">
-                <div class="stat-label">Còn Lại</div>
-                <div id="remainingTime" class="stat-value">--</div>
+
+                <div class="stat-label">
+                    Còn Lại
+                </div>
+
+                <div
+                    id="remainingTime"
+                    class="stat-value">
+                    --
+                </div>
+
             </div>
+
             <div class="stat-box">
-                <div class="stat-label">Chế Độ</div>
-                <div id="transferMode" class="stat-value">Idle</div>
+
+                <div class="stat-label">
+                    Loại
+                </div>
+
+                <div
+                    id="transferMode"
+                    class="stat-value">
+                    Idle
+                </div>
+
             </div>
+
         </div>
+
     </div>
 
     <div class="log-card">
-        <div class="log-title">Nhật Ký Kết Nối</div>
-        <div id="logBox" class="log-box">Hệ thống khởi động hoàn tất...</div>
+
+        <div class="log-title">
+            Nhật Ký
+        </div>
+
+        <div id="logBox" class="log-box">
+
+            Hệ thống khởi động...
+
+        </div>
+
     </div>
+
 </div>
 
-<div id="toast" class="toast"></div>
+<div
+    id="toast"
+    class="toast">
+</div>
 
 <script type="module" src="script.js"></script>
+
 </body>
 </html>

@@ -5,6 +5,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent; /* Tối ưu trải nghiệm chạm trên điện thoại */
 }
 
 html, body {
@@ -29,7 +30,7 @@ html, body {
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 24px;
@@ -47,7 +48,7 @@ html, body {
 /* ===================================================
    CARDS COMMON UI
 =================================================== */
-.header-card, .status-card, .section-card, .log-card {
+.header-card, .status-card, .section-card, .progress-card, .log-card {
     background: #111827;
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -79,30 +80,14 @@ html, body {
 .section-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #f1f5f9; }
 
 /* ===================================================
-   INPUTS & BUTTONS
+   INPUTS & BUTTONS 3D MECHANIC EFFECT
 =================================================== */
-.input-group { margin-bottom: 12px; width: 100%; }
-
-.file-label-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: 12px;
-    background: #1e293b;
-    border: 1px dashed rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-.file-label-btn:hover { background: #334155; border-color: #3b82f6; }
-.file-name { margin-top: 6px; text-align: center; font-size: 12px; color: #cbd5e1; word-break: break-all; }
+.input-group { margin-bottom: 14px; width: 100%; }
+.file-name { margin-top: 10px; text-align: center; font-size: 12px; color: #cbd5e1; word-break: break-all; }
 
 .room-input {
     width: 100%;
-    height: 44px;
+    height: 46px;
     border-radius: 12px;
     text-align: center;
     font-size: 18px;
@@ -114,27 +99,59 @@ html, body {
 }
 .room-input:focus { border-color: #22c55e; }
 
-/* Button Controls */
+/* --- CORE BUTTONS STYLE 3D --- */
 .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
-    border: none;
-    cursor: pointer;
-    padding: 12px;
+    padding: 14px;
     border-radius: 12px;
     font-size: 14px;
     font-weight: 700;
     color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s ease;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    user-select: none;
+    transition: all 0.08s ease; /* Tăng tốc phản hồi chuyển động phím bấm */
 }
-.btn:active { transform: scale(0.98); }
-.btn-primary { background: linear-gradient(180deg, #8b5cf6, #6d28d9); box-shadow: 0 4px 12px rgba(109, 40, 217, 0.3); }
-.btn-success { background: linear-gradient(180deg, #22c55e, #15803d); box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3); }
+
+/* Nút Chọn File 3D (Xám Slate) */
+.btn-file-3d {
+    background: #334155;
+    box-shadow: 0 5px 0 #1e293b, 0 8px 16px rgba(0, 0, 0, 0.4);
+}
+.btn-file-3d:hover { background: #475569; }
+.btn-file-3d:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 #1e293b, 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Nút Tạo Phòng Gửi 3D (Tím) */
+.btn-primary {
+    background: #7c3aed;
+    box-shadow: 0 5px 0 #5b21b6, 0 8px 16px rgba(124, 58, 237, 0.3);
+}
+.btn-primary:hover { background: #8b5cf6; }
+.btn-primary:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 #5b21b6, 0 2px 4px rgba(124, 58, 237, 0.3);
+}
+
+/* Nút Nhận File 3D (Xanh Lá) */
+.btn-success {
+    background: #16a34a;
+    box-shadow: 0 5px 0 #166534, 0 8px 16px rgba(22, 163, 74, 0.3);
+}
+.btn-success:hover { background: #22c55e; }
+.btn-success:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 #166534, 0 2px 4px rgba(22, 163, 74, 0.3);
+}
 
 /* Room Info Area */
-.room-info { margin-top: 12px; text-align: center; background: #0f172a; padding: 10px; border-radius: 12px; }
+.room-info { margin-top: 14px; text-align: center; background: #0f172a; padding: 10px; border-radius: 12px; }
 .room-label { font-size: 11px; color: #94a3b8; }
 .room-code { font-size: 26px; font-weight: 800; color: #3b82f6; letter-spacing: 4px; margin-top: 2px; }
 
