@@ -139,7 +139,7 @@ function generateRoomQR(code) {
     });
 
     qrArea.style.display = "block";
-    addLog("Mã QR phòng kết nối nhanh đã được tạo");
+    addLog("Mã QR kết nối nhanh đã được tạo");
 }
 
 function checkURLParameters() {
