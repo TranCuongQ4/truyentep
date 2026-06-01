@@ -201,6 +201,20 @@ html, body {
 }
 .toast.show { opacity: 1; }
 
+/* ===================================================
+   APP FOOTER STYLE
+=================================================== */
+.app-footer {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.6); /* Màu chữ trắng mờ nhẹ sang trọng, không bị chói */
+    padding-top: 6px;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
 /* Responsive Mobile setup */
 @media (max-width: 420px) {
     body { padding: 0; }
