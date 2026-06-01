@@ -14,7 +14,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -36,7 +35,7 @@
         </div>
 
         <div class="app-subtitle">
-            WebRTC Multi-File & QR Connect
+            WebRTC Multi-File Engine (Auto Zip & Extract)
         </div>
 
     </div>
@@ -44,7 +43,7 @@
     <div class="status-card">
 
         <div class="status-label">
-            Trạng Thái
+            Trạng Thái Hộp Kênh
         </div>
 
         <div id="connectionStatus" class="status-value ready">
@@ -56,13 +55,13 @@
     <div class="section-card">
 
         <div class="section-title">
-            📤 Gửi File (Hỗ Trợ Nhiều File)
+            📤 Khu Vực Gửi Nhóm Tệp Tin
         </div>
 
         <div class="input-group">
 
             <label for="fileInput" class="file-label-btn">
-                📁 Chọn File Cần Gửi (Có thể chọn nhiều)
+                📁 Chọn Nhiều File Cần Gửi
             </label>
 
             <input
@@ -81,13 +80,13 @@
         <button
             id="createRoomBtn"
             class="btn btn-primary">
-            Tạo Phòng Gửi
+            Khởi Tạo Luồng Gửi
         </button>
 
         <div class="room-info">
 
             <div class="room-label">
-                Mã Phòng Của Bạn:
+                Mã Mã Phòng Truyền:
             </div>
 
             <div
@@ -98,7 +97,7 @@
 
             <div id="qrArea" class="qr-container" style="display: none;">
                 <div id="qrcode"></div>
-                <div class="qr-hint">Quét mã để nhận file nhanh</div>
+                <div class="qr-hint">Quét mã nhận file nhanh</div>
             </div>
 
         </div>
@@ -108,7 +107,7 @@
     <div class="section-card">
 
         <div class="section-title">
-            📥 Nhận File
+            📥 Khu Vực Tiếp Nhận Dữ Liệu
         </div>
 
         <div class="input-group">
@@ -125,13 +124,13 @@
         <button
             id="joinRoomBtn"
             class="btn btn-success">
-            Kết Nối Nhận File
+            Kết Nối Đồng Bộ Nhận
         </button>
 
         <button
             id="openScanBtn"
             class="btn btn-scan">
-            📷 Quét QR Nhận Nhanh
+            📷 Quét Mã QR Qua Cam
         </button>
 
     </div>
@@ -141,7 +140,7 @@
         <div class="progress-header">
 
             <div class="progress-label">
-                Tiến Trình Truyền Tải
+                Tiến Trình Đường Truyền
             </div>
 
             <div
@@ -166,7 +165,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Dung Lượng
+                    Đã Đồng Bộ
                 </div>
 
                 <div
@@ -180,7 +179,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Tốc Độ (Đa Luồng)
+                    Tốc Độ Stream
                 </div>
 
                 <div
@@ -198,7 +197,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Còn Lại
+                    Thời Gian Còn Lại
                 </div>
 
                 <div
@@ -212,7 +211,7 @@
             <div class="stat-box">
 
                 <div class="stat-label">
-                    Luồng SCTP
+                    Kênh Kết Nối
                 </div>
 
                 <div
@@ -230,12 +229,12 @@
     <div class="log-card">
 
         <div class="log-title">
-            Nhật Ký Hệ Thống
+            Nhật Ký Đường Truyền
         </div>
 
         <div id="logBox" class="log-box">
 
-            Hệ thống khởi động...
+            Hệ thống đang chờ lệnh...
 
         </div>
 
@@ -250,14 +249,14 @@
 <div id="scannerModal" class="scanner-modal">
     <div class="scanner-content">
         <div class="scanner-header">
-            <h3>Quét Mã QR Nhận File</h3>
+            <h3>Quét Mã QR Kết Nối</h3>
             <button id="closeScanBtn" class="close-scan-btn">&times;</button>
         </div>
         <div class="scanner-view-wrapper">
             <div id="scannerReader"></div>
             <div class="scanner-laser-line"></div>
         </div>
-        <div class="scanner-footer-hint">Hướng camera về phía mã QR Code phòng gửi</div>
+        <div class="scanner-footer-hint">Di chuyển camera khớp với mã QR của máy gửi</div>
     </div>
 </div>
 
