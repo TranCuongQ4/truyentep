@@ -240,27 +240,34 @@ createRoomBtn.addEventListener("click", async () => {
     }
 
     isSender = true;
-    setStatus("Đang đóng gói dữ liệu...", "#facc15");
     
     try {
-        const zip = new JSZip();
-        
-        // Đẩy toàn bộ danh sách tệp tin vào cây thư mục của gói nén dạng RAM Stream
-        selectedFilesArray.forEach(file => {
-            zip.file(file.name, file);
-        });
-        
-        // Xuất định dạng luồng nhị phân Blob nén ở cấp độ tối ưu cân bằng RAM xử lý nhanh
-        finalZipBlob = await zip.generateAsync({
-            type: "blob",
-            compression: "DEFLATE",
-            compressionOptions: { level: 4 }
-        });
-        
-        addLog(`Đóng gói nhóm file hoàn tất! Dung lượng luồng nén: ${formatSize(finalZipBlob.size)}`);
+        // Kiểm tra nếu chỉ có 1 file duy nhất và file đó đã có sẵn định dạng nén mở rộng .zip
+        if (selectedFilesArray.length === 1 && selectedFilesArray[0].name.toLowerCase().endsWith('.zip')) {
+            setStatus("Đang chuẩn bị file zip gốc...", "#facc15");
+            finalZipBlob = selectedFilesArray[0]; // Gán trực tiếp không qua JSZip nữa
+            addLog(`Phát hiện tệp nén sẵn: ${finalZipBlob.name}. Bỏ qua tiến trình đóng gói phụ.`);
+        } else {
+            setStatus("Đang đóng gói dữ liệu...", "#facc15");
+            const zip = new JSZip();
+            
+            // Đẩy toàn bộ danh sách tệp tin vào cây thư mục của gói nén dạng RAM Stream
+            selectedFilesArray.forEach(file => {
+                zip.file(file.name, file);
+            });
+            
+            // Xuất định dạng luồng nhị phân Blob nén ở cấp độ tối ưu cân bằng RAM xử lý nhanh
+            finalZipBlob = await zip.generateAsync({
+                type: "blob",
+                compression: "DEFLATE",
+                compressionOptions: { level: 4 }
+            });
+            
+            addLog(`Đóng gói nhóm file hoàn tất! Dung lượng luồng nén: ${formatSize(finalZipBlob.size)}`);
+        }
     } catch (err) {
         console.error(err);
-        showToast("Lỗi nén tệp tin");
+        showToast("Lỗi xử lý tệp tin");
         setStatus("Lỗi đóng gói", "#ef4444");
         return;
     }
@@ -358,10 +365,15 @@ async function sendFileMultiChannel() {
     transferStartTime = Date.now();
     addLog(`Bắt đầu bẻ mảnh truyền gói tin nén đa kênh song song...`);
 
+    // Thiết lập tên file động: Giữ tên gốc nếu đã là zip, ngược lại đặt tên package mặc định
+    const outputName = (selectedFilesArray.length === 1 && selectedFilesArray[0].name.toLowerCase().endsWith('.zip')) 
+                       ? selectedFilesArray[0].name 
+                       : `package_${roomId}.zip`;
+
     // Gửi thông số metadata định hình trước luồng dữ liệu cho bên nhận xử lý ngầm
     dataChannels[0].send(JSON.stringify({
         type: "metadata",
-        name: `package_${roomId}.zip`,
+        name: outputName,
         size: finalZipBlob.size,
         totalChunks: Math.ceil(finalZipBlob.size / chunkSize)
     }));
@@ -591,7 +603,7 @@ async function processExtractAndBungFiles() {
         console.error("Lỗi trích xuất gói dữ liệu:", err);
         addLog("Có lỗi bung file! Tiến hành xuất file gói nén dự phòng...");
         
-        // Cơ chế fallback dự phòng: Nếu thiết bị cấu hình quá yếu không bung được, tải trực tiếp file zip gốc về máy
+        // Cơ chế fallback dự phòng: Nếu thiết bị cấu hình quá yếu hoặc nhận thẳng file zip gốc (đã bypass nén ban đầu), tải trực tiếp về máy.
         const backupUrl = URL.createObjectURL(finalZipBlobObj);
         const backupAnchor = document.createElement("a");
         backupAnchor.href = backupUrl;
