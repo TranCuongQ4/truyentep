@@ -101,6 +101,70 @@ const rtcConfig = {
 };
 
 // =====================================================
+// TỰ ĐỘNG KHỞI TẠO BẢNG THÔNG BÁO XANH NGỌC (DYNAMIC MODAL CSS/HTML)
+// =====================================================
+const styleEl = document.createElement("style");
+styleEl.textContent = `
+    .custom-success-modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center; z-index: 99999;
+        opacity: 0; pointer-events: none; transition: all 0.3s ease;
+    }
+    .custom-success-modal.active { opacity: 1; pointer-events: auto; }
+    .custom-success-content {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        border: 2px solid #06b6d4; border-radius: 16px; padding: 28px;
+        width: 90%; max-width: 400px; text-align: center;
+        box-shadow: 0 20px 25px -5px rgba(6, 182, 212, 0.15), 0 10px 10px -5px rgba(6, 182, 212, 0.1);
+        transform: scale(0.9); transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .custom-success-modal.active .custom-success-content { transform: scale(1); }
+    .custom-success-title {
+        color: #22d3ee; font-size: 20px; font-weight: 700; margin-bottom: 20px;
+        letter-spacing: 0.5px; text-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+    }
+    .custom-success-btn {
+        background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+        color: #ffffff; font-weight: 600; font-size: 15px;
+        padding: 10px 32px; border: none; border-radius: 8px; cursor: pointer;
+        box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3); transition: all 0.2s ease;
+    }
+    .custom-success-btn:hover {
+        transform: translateY(-1px); box-shadow: 0 6px 16px rgba(6, 182, 212, 0.45); filter: brightness(1.1);
+    }
+    .custom-success-btn:active { transform: translateY(1px); }
+`;
+document.head.appendChild(styleEl);
+
+const modalWrapper = document.createElement("div");
+modalWrapper.className = "custom-success-modal";
+modalWrapper.innerHTML = `
+    <div class="custom-success-content">
+        <div class="custom-success-title" id="customSuccessTitle">🎁 Đã Nhận Đủ Dữ Liệu 🎁</div>
+        <button class="custom-success-btn" id="customSuccessBtn">OK</button>
+    </div>
+`;
+document.body.appendChild(modalWrapper);
+
+const customSuccessTitle = document.getElementById("customSuccessTitle");
+const customSuccessBtn = document.getElementById("customSuccessBtn");
+
+function showSuccessModal(message, callback) {
+    customSuccessTitle.textContent = message;
+    modalWrapper.classList.add("active");
+    
+    // Xóa sự kiện cũ tránh trùng lặp khi gọi nhiều lần
+    const newBtn = customSuccessBtn.cloneNode(true);
+    customSuccessBtn.parentNode.replaceChild(newBtn, customSuccessBtn);
+    
+    newBtn.addEventListener("click", () => {
+        modalWrapper.classList.remove("active");
+        if (callback) callback();
+    });
+}
+
+// =====================================================
 // UTILS LOGS & TOAST
 // =====================================================
 function addLog(text){
@@ -447,11 +511,14 @@ async function sendAllFilesSequentially() {
 
     isTransferring = false;
     setStatus("Gửi thành công", "#22c55e");
-    showToast("Đã gửi toàn bộ file thành công!");
-
-    // Sau khi chắc chắn máy nhận đã lấy đủ 100% dữ liệu, tiến hành xóa phòng an toàn và dọn dẹp giao diện
+    
+    // Sau khi chắc chắn máy nhận đã lấy đủ 100% dữ liệu, tiến hành xóa phòng an toàn
     await cleanupRoom();
-    resetTransfer();
+
+    // Hiện bảng xanh ngọc thông báo cho bên Gửi và reset giao diện sau khi đóng bảng
+    showSuccessModal("🎁 Đã Hoàn Tất Gửi File 🎁", () => {
+        resetTransfer();
+    });
 }
 
 // Hàm đẩy các mảnh dữ liệu nhị phân
@@ -495,7 +562,7 @@ async function sendCurrentFileSegments() {
     }
 }
 
-// Hàm kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
+// Hàm kích kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
 async function initiateIceRestart() {
     if (!isSender || !peerConnection || isPaused) return;
     
@@ -734,6 +801,11 @@ function saveReceivedFileDirectly(activeChannel) {
                 if (activeChannel.readyState === "open") {
                     activeChannel.send(JSON.stringify({ type: "all_files_received" }));
                 }
+                
+                // Hiện bảng xanh ngọc thông báo cho bên Nhận biết đã hoàn thành
+                showSuccessModal("🎁 Đã Nhận Đủ Dữ Liệu 🎁", () => {
+                    resetTransfer();
+                });
             }, 300);
         }
     }
