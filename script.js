@@ -58,7 +58,6 @@ const scannerModal = document.getElementById("scannerModal");
 // GLOBAL VARIABLES
 // =====================================================
 let selectedFilesArray = []; // Chứa danh sách mảng các file gốc người dùng chọn
-let finalZipBlob = null;      // Chứa tệp tin nén nhị phân tổng hợp cuối cùng
 let roomId = null;
 let isSender = false;
 let peerConnection = null;
@@ -69,7 +68,7 @@ const numChannels = 3;
 let dataChannels = [];
 let openChannelsCount = 0;
 
-// Bộ đệm gom mảnh dữ liệu nhị phân nhận về từ xa
+// Bộ đệm gom mảnh dữ liệu nhị phân nhận về từ xa cho từng file lẻ
 let receiveBuffers = {}; 
 let receivedChunksCount = 0;
 let totalExpectedChunks = 0;
@@ -212,26 +211,35 @@ function stopQrScanner() {
 }
 
 // =====================================================
-// FILE HANDLING & SELECTION
+// FILE HANDLING & SELECTION (MAX 50 FILES)
 // =====================================================
 fileInput.addEventListener("change", () => {
     if(!fileInput.files.length) return;
     
+    // Giới hạn chọn tối đa 50 file theo yêu cầu
+    if (fileInput.files.length > 50) {
+        showToast("Chỉ được phép chọn tối đa 50 file một lúc!");
+        fileInput.value = "";
+        selectedFilesArray = [];
+        fileName.textContent = "Chưa có file nào được chọn";
+        return;
+    }
+
     selectedFilesArray = Array.from(fileInput.files);
     
     if(selectedFilesArray.length === 1) {
         fileName.textContent = selectedFilesArray[0].name + " (" + formatSize(selectedFilesArray[0].size) + ")";
-        addLog(`Đã chọn file đơn lẻ: ${selectedFilesArray[0].name}`);
+        addLog(`Đã chọn 1 file: ${selectedFilesArray[0].name}`);
     } else {
         let totalBytes = selectedFilesArray.reduce((sum, f) => sum + f.size, 0);
         fileName.innerHTML = `<span style="color:#22c55e; font-weight:700;">Danh sách: ${selectedFilesArray.length} tệp tin được chọn</span><br>` + 
-                             `<span style="font-size:11px; color:#94a3b8;">Tổng trọng lượng tệp: ${formatSize(totalBytes)}</span>`;
-        addLog(`Đã tải nhóm gồm ${selectedFilesArray.length} file lên bộ nhớ đệm.`);
+                             `<span style="font-size:11px; color:#94a3b8;">Tổng dung lượng gốc: ${formatSize(totalBytes)}</span>`;
+        addLog(`Đã tải nhóm gồm ${selectedFilesArray.length} file vào hàng đợi gửi gốc.`);
     }
 });
 
 // =====================================================
-// SENDER: CREATE ROOM & AUTO ZIP PACKAGING
+// SENDER: CREATE ROOM (NO ZIP COMPRESSION)
 // =====================================================
 createRoomBtn.addEventListener("click", async () => {
     if(selectedFilesArray.length === 0){
@@ -240,43 +248,12 @@ createRoomBtn.addEventListener("click", async () => {
     }
 
     isSender = true;
-    
-    try {
-        // Kiểm tra nếu chỉ có 1 file duy nhất và file đó đã có sẵn định dạng nén mở rộng .zip
-        if (selectedFilesArray.length === 1 && selectedFilesArray[0].name.toLowerCase().endsWith('.zip')) {
-            setStatus("Đang chuẩn bị file zip gốc...", "#facc15");
-            finalZipBlob = selectedFilesArray[0]; // Gán trực tiếp không qua JSZip nữa
-            addLog(`Phát hiện tệp nén sẵn: ${finalZipBlob.name}. Bỏ qua tiến trình đóng gói phụ.`);
-        } else {
-            setStatus("Đang đóng gói dữ liệu...", "#facc15");
-            const zip = new JSZip();
-            
-            // Đẩy toàn bộ danh sách tệp tin vào cây thư mục của gói nén dạng RAM Stream
-            selectedFilesArray.forEach(file => {
-                zip.file(file.name, file);
-            });
-            
-            // Xuất định dạng luồng nhị phân Blob nén ở cấp độ tối ưu cân bằng RAM xử lý nhanh
-            finalZipBlob = await zip.generateAsync({
-                type: "blob",
-                compression: "DEFLATE",
-                compressionOptions: { level: 4 }
-            });
-            
-            addLog(`Đóng gói nhóm file hoàn tất! Dung lượng luồng nén: ${formatSize(finalZipBlob.size)}`);
-        }
-    } catch (err) {
-        console.error(err);
-        showToast("Lỗi xử lý tệp tin");
-        setStatus("Lỗi đóng gói", "#ef4444");
-        return;
-    }
+    setStatus("Đang khởi tạo phòng...", "#facc15");
 
     roomId = generateRoomCode();
     roomCode.textContent = roomId;
     generateRoomQR(roomId);
 
-    setStatus("Đang tạo phòng...");
     const roomRef = ref(db, `rooms/${roomId}`);
     await set(roomRef, { createdAt: Date.now(), status: "waiting" });
     setStatus("Chờ máy nhận kết nối...");
@@ -315,7 +292,7 @@ async function createSenderPeer(){
         offer: { type: offer.type, sdp: offer.sdp }
     });
 
-    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP song song`);
+    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP song parallel`);
     listenForAnswer();
 }
 
@@ -326,7 +303,7 @@ function setupSenderChannelEvents(channel) {
         if (openChannelsCount === numChannels && isSender) {
             setStatus("Đang truyền dữ liệu...", "#3b82f6");
             transferMode.textContent = `${numChannels} Kênh Gửi`;
-            setTimeout(() => { sendFileMultiChannel(); }, 600);
+            setTimeout(() => { sendAllFilesSequentially(); }, 600);
         }
     };
     channel.onclose = () => { addLog(`Luồng [${channel.label}] đóng`); };
@@ -359,60 +336,67 @@ function listenForAnswer(){
     });
 }
 
-async function sendFileMultiChannel() {
-    if (!finalZipBlob) return;
-
+// Hàm gửi nối đuôi tuần tự toàn bộ danh sách file gốc
+async function sendAllFilesSequentially() {
     transferStartTime = Date.now();
-    addLog(`Bắt đầu bẻ mảnh truyền gói tin nén đa kênh song song...`);
+    addLog(`Bắt đầu truyền tải tuần tự từng file nguyên mẫu trong danh sách...`);
 
-    // Thiết lập tên file động: Giữ tên gốc nếu đã là zip, ngược lại đặt tên package mặc định
-    const outputName = (selectedFilesArray.length === 1 && selectedFilesArray[0].name.toLowerCase().endsWith('.zip')) 
-                       ? selectedFilesArray[0].name 
-                       : `package_${roomId}.zip`;
+    for (let i = 0; i < selectedFilesArray.length; i++) {
+        const file = selectedFilesArray[i];
+        addLog(`[${i + 1}/${selectedFilesArray.length}] Đang gửi file: ${file.name} (${formatSize(file.size)})`);
+        
+        // Gửi tín hiệu báo bắt đầu một file mới (Metadata)
+        dataChannels[0].send(JSON.stringify({
+            type: "metadata",
+            name: file.name,
+            size: file.size,
+            totalChunks: Math.ceil(file.size / chunkSize)
+        }));
 
-    // Gửi thông số metadata định hình trước luồng dữ liệu cho bên nhận xử lý ngầm
-    dataChannels[0].send(JSON.stringify({
-        type: "metadata",
-        name: outputName,
-        size: finalZipBlob.size,
-        totalChunks: Math.ceil(finalZipBlob.size / chunkSize)
-    }));
+        let offset = 0;
+        let chunkIndex = 0;
 
-    let offset = 0;
-    let chunkIndex = 0;
+        while (offset < file.size) {
+            const currentChannel = dataChannels[chunkIndex % numChannels];
 
-    while (offset < finalZipBlob.size) {
-        const currentChannel = dataChannels[chunkIndex % numChannels];
+            // Chống tràn bộ đệm WebRTC
+            if (currentChannel.bufferedAmount > 1024 * 1024) {
+                await new Promise(r => setTimeout(r, 20));
+                continue; 
+            }
 
-        if (currentChannel.bufferedAmount > 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 25));
-            continue; 
+            const slice = file.slice(offset, offset + chunkSize);
+            const buffer = await slice.arrayBuffer();
+
+            const packet = new Uint8Array(4 + buffer.byteLength);
+            const view = new DataView(packet.buffer);
+            view.setUint32(0, chunkIndex); 
+            packet.set(new Uint8Array(buffer), 4);
+
+            currentChannel.send(packet);
+
+            offset += buffer.byteLength;
+            chunkIndex++;
+
+            updateSendProgress(offset, file.size, file.name, i + 1, selectedFilesArray.length);
         }
 
-        const slice = finalZipBlob.slice(offset, offset + chunkSize);
-        const buffer = await slice.arrayBuffer();
+        // Đợi một khoảng ngắn trước khi gửi tín hiệu hoàn thành file này để chắc chắn data đã đi hết
+        await new Promise(r => setTimeout(r, 100));
 
-        const packet = new Uint8Array(4 + buffer.byteLength);
-        const view = new DataView(packet.buffer);
-        view.setUint32(0, chunkIndex); 
-        packet.set(new Uint8Array(buffer), 4);
-
-        currentChannel.send(packet);
-
-        offset += buffer.byteLength;
-        chunkIndex++;
-
-        updateSendProgress(offset, finalZipBlob.size);
+        // Báo kết thúc thành công 1 file đơn lẻ
+        dataChannels.forEach(chan => {
+            if (chan.readyState === "open") {
+                chan.send(JSON.stringify({ type: "file_complete" }));
+            }
+        });
+        
+        addLog(`Đã gửi xong file: ${file.name}`);
     }
 
-    dataChannels.forEach(chan => {
-        if (chan.readyState === "open") {
-            chan.send(JSON.stringify({ type: "complete" }));
-        }
-    });
-
-    addLog("Đã đẩy toàn bộ khối phân mảnh dữ liệu thành công");
+    // Hoàn thành toàn bộ tiến trình phòng gửi
     setStatus("Gửi thành công", "#22c55e");
+    showToast("Đã gửi toàn bộ file thành công!");
 
     setTimeout(async () => {
         await cleanupRoom();
@@ -505,7 +489,7 @@ function listenOfferCandidates(){
 }
 
 // =====================================================
-// RECEIVER: STREAM RECEIVE & AUTO EXTRACT TO DOWNLOADS
+// RECEIVER: STREAM RECEIVE & AUTO DOWNLOAD ORIGINALS
 // =====================================================
 function handleIncomingMultiChannelData(event) {
     if (typeof event.data === "string") {
@@ -518,14 +502,12 @@ function handleIncomingMultiChannelData(event) {
             receiveBuffers = {};
             receivedChunksCount = 0;
             receiveSize = 0;
-            addLog(`Bắt đầu tiếp nhận luồng dữ liệu đóng gói...`);
+            addLog(`Đang nhận file: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
             return;
         }
 
-        if (msg.type === "complete") {
-            if (receivedChunksCount === totalExpectedChunks && totalExpectedChunks > 0) {
-                processExtractAndBungFiles();
-            }
+        if (msg.type === "file_complete") {
+            saveReceivedFileDirectly();
             return;
         }
         return;
@@ -542,94 +524,55 @@ function handleIncomingMultiChannelData(event) {
         receiveSize += rawData.byteLength;
         updateReceiveProgress();
     }
-
-    if (receivedChunksCount === totalExpectedChunks && totalExpectedChunks > 0) {
-        processExtractAndBungFiles();
-    }
 }
 
-// Hàm cốt lõi xử lý bung file ngầm trực tiếp ra thư mục Download của người nhận
-async function processExtractAndBungFiles() {
-    if (totalExpectedChunks === 0) return; 
-    totalExpectedChunks = 0; 
-
-    setStatus("Đang giải nén ngầm...", "#facc15");
-    addLog("Đang kết nối tổ hợp cấu trúc nhị phân và tự động bung file ra máy...");
+// Xử lý tạo lệnh tải xuống trực tiếp tệp tin gốc ngay khi nhận xong (Không bung/giải nén)
+function saveReceivedFileDirectly() {
+    if (receivedChunksCount === 0) return;
+    
+    addLog(`Đang ghi file nguyên mẫu xuống ổ đĩa: ${expectedFileName}`);
     
     const sortedBuffers = [];
     const totalKeys = Object.keys(receiveBuffers).length;
     
     for (let i = 0; i < totalKeys; i++) {
-        sortedBuffers.push(receiveBuffers[i]);
-    }
-
-    const finalZipBlobObj = new Blob(sortedBuffers);
-
-    try {
-        // Nạp khối gói nén vào RAM xử lý của JSZip
-        const zip = await JSZip.loadAsync(finalZipBlobObj);
-        const fileKeys = Object.keys(zip.files);
-        
-        addLog(`Tìm thấy tổng số ${fileKeys.length} tệp tin trong gói truyền tải.`);
-
-        // Lặp qua từng file đơn lẻ trong gói nén, trích xuất ngược thành Blob gốc rồi kích hoạt lệnh tải tự động
-        for (const filename of fileKeys) {
-            const currentZipFile = zip.files[filename];
-            
-            // Bỏ qua nếu là cấu trúc thư mục rỗng ngầm
-            if (currentZipFile.dir) continue;
-
-            const fileDataBlob = await currentZipFile.async("blob");
-            const fileObjectURL = URL.createObjectURL(fileDataBlob);
-            
-            // Tạo thẻ liên kết tải xuống ảo để đưa file thẳng vào mục Downloads của trình duyệt người dùng
-            const downloadAnchor = document.createElement("a");
-            downloadAnchor.href = fileObjectURL;
-            downloadAnchor.download = filename;
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            
-            // Thu hồi bộ nhớ RAM đệm ngay lập tức sau khi kích hoạt lệnh tải để tránh tràn bộ nhớ
-            document.body.removeChild(downloadAnchor);
-            URL.revokeObjectURL(fileObjectURL);
-            
-            addLog(`Đã bung và tải thành công tệp: ${filename}`);
+        if (receiveBuffers[i]) {
+            sortedBuffers.push(receiveBuffers[i]);
         }
-        
-        showToast(`Đã nhận trọn vẹn ${fileKeys.length} file vào thư mục Download!`);
-        setStatus("Nhận thành công", "#22c55e");
-        
-    } catch (err) {
-        console.error("Lỗi trích xuất gói dữ liệu:", err);
-        addLog("Có lỗi bung file! Tiến hành xuất file gói nén dự phòng...");
-        
-        // Cơ chế fallback dự phòng: Nếu thiết bị cấu hình quá yếu hoặc nhận thẳng file zip gốc (đã bypass nén ban đầu), tải trực tiếp về máy.
-        const backupUrl = URL.createObjectURL(finalZipBlobObj);
-        const backupAnchor = document.createElement("a");
-        backupAnchor.href = backupUrl;
-        backupAnchor.download = expectedFileName;
-        backupAnchor.click();
-        URL.revokeObjectURL(backupUrl);
-        setStatus("Nhận dự phòng", "#22c55e");
     }
 
-    progressBar.style.width = "100%";
-    progressPercent.textContent = "100%";
-
-    setTimeout(async () => {
-        await cleanupRoom();
-        resetTransfer();
-    }, 4000);
+    // Xuất thẳng file gốc từ mảng buffer thô nhận được
+    const receivedBlob = new Blob(sortedBuffers);
+    const fileObjectURL = URL.createObjectURL(receivedBlob);
+    
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.href = fileObjectURL;
+    downloadAnchor.download = expectedFileName;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    
+    document.body.removeChild(downloadAnchor);
+    URL.revokeObjectURL(fileObjectURL);
+    
+    addLog(`Đã tải xuống thành công file gốc: ${expectedFileName}`);
+    showToast(`Đã nhận xong: ${expectedFileName}`);
+    
+    // Reset bộ đệm nhận để chuẩn bị đón nhận file tiếp theo trong hàng đợi tuần tự
+    receiveBuffers = {};
+    receivedChunksCount = 0;
+    totalExpectedChunks = 0;
+    receiveSize = 0;
 }
 
 // =====================================================
 // PROGRESS CALCULATION HELPERS
 // =====================================================
-function updateSendProgress(sent, total){
+function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     const percent = Math.floor(sent / total * 100);
     progressBar.style.width = percent + "%";
     progressPercent.textContent = percent + "%";
-    transferSize.textContent = formatSize(sent) + " / " + formatSize(total);
+    transferSize.textContent = `${formatSize(sent)} / ${formatSize(total)} (File ${fileIdx}/${totalFiles})`;
+    fileName.textContent = `[Gửi ${fileIdx}/${totalFiles}] ${currentName}`;
 
     const elapsed = (Date.now() - transferStartTime) / 1000;
     const speed = sent / Math.max(elapsed, 0.1);
@@ -645,6 +588,7 @@ function updateReceiveProgress(){
     progressBar.style.width = Math.min(percent, 100) + "%";
     progressPercent.textContent = Math.min(percent, 100) + "%";
     transferSize.textContent = formatSize(receiveSize) + " / " + formatSize(expectedFileSize);
+    fileName.textContent = `[Nhận] ${expectedFileName}`;
 
     const elapsed = (Date.now() - transferStartTime) / 1000;
     const speed = receiveSize / Math.max(elapsed, 0.1);
@@ -703,7 +647,7 @@ async function cleanupRoom(){
     try{
         if(roomId){
             await remove(ref(db, `rooms/${roomId}`));
-            addLog("Đã giải phóng tài nguyên phòng truyền trên Firebase");
+            addLog("Đã giải phóng tài nguyên phòng trên Firebase");
         }
     }catch(err){ console.error(err); }
 }
@@ -718,7 +662,6 @@ function resetTransfer(){
     expectedFileSize = 0;
     expectedFileName = "";
     selectedFilesArray = [];
-    finalZipBlob = null;
     
     progressBar.style.width = "0%";
     progressPercent.textContent = "0%";
