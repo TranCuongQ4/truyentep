@@ -449,7 +449,7 @@ async function sendAllFilesSequentially() {
     setStatus("Gửi thành công", "#22c55e");
     showToast("Đã gửi toàn bộ file thành công!");
 
-    // Sau khi chắc chắn máy nhận đã lấy đủ 100% dữ liệu, tiến hành xóa phòng an toàn
+    // Sau khi chắc chắn máy nhận đã lấy đủ 100% dữ liệu, tiến hành xóa phòng an toàn và dọn dẹp giao diện
     await cleanupRoom();
     resetTransfer();
 }
@@ -721,7 +721,6 @@ function saveReceivedFileDirectly(activeChannel) {
     receivedChunksCount = 0;
     totalExpectedChunks = 0;
     receiveSize = 0;
-    const savedName = expectedFileName;
     expectedFileName = ""; 
 
     // Gửi tín hiệu bắt tay (ACK) ngược lại cho máy gửi biết để nhảy sang file kế tiếp
