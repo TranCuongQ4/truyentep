@@ -57,7 +57,7 @@ const scannerModal = document.getElementById("scannerModal");
 // =====================================================
 // GLOBAL VARIABLES
 // =====================================================
-let selectedFilesArray = []; // Chứa danh sách mảng các file gốc người dùng chọn
+let selectedFilesArray = []; 
 let roomId = null;
 let isSender = false;
 let peerConnection = null;
@@ -77,6 +77,14 @@ let expectedFileSize = 0;
 let expectedFileName = "";
 let transferStartTime = 0;
 let unsubscribeAnswer = null;
+let unsubscribeOffer = null;
+
+// Quản lý trạng thái truyền tải khi mất kết nối mạng đột ngột
+let isTransferring = false;
+let isPaused = false;
+let currentSendingFileIdx = 0;
+let currentSendingOffset = 0;
+let currentSendingChunkIndex = 0;
 
 const chunkSize = 16 * 1024; // Kích thước khối chunk dữ liệu tiêu chuẩn WebRTC 16KB
 
@@ -216,7 +224,6 @@ function stopQrScanner() {
 fileInput.addEventListener("change", () => {
     if(!fileInput.files.length) return;
     
-    // Giới hạn chọn tối đa 50 file theo yêu cầu
     if (fileInput.files.length > 50) {
         showToast("Chỉ được phép chọn tối đa 50 file một lúc!");
         fileInput.value = "";
@@ -270,6 +277,7 @@ async function createSenderPeer(){
     dataChannels = [];
     openChannelsCount = 0;
 
+    // Khởi tạo các kênh dữ liệu luồng
     for (let i = 0; i < numChannels; i++) {
         const channel = peerConnection.createDataChannel(`fileTransfer_${i}`, { ordered: true });
         channel.binaryType = "arraybuffer";
@@ -300,10 +308,24 @@ function setupSenderChannelEvents(channel) {
     channel.onopen = () => {
         openChannelsCount++;
         addLog(`Luồng dữ liệu sổ [${channel.label}] đồng bộ mở`);
+        
         if (openChannelsCount === numChannels && isSender) {
-            setStatus("Đang truyền dữ liệu...", "#3b82f6");
             transferMode.textContent = `${numChannels} Kênh Gửi`;
-            setTimeout(() => { sendAllFilesSequentially(); }, 600);
+            
+            if (isPaused) {
+                // Phục hồi kết nối sau khi rớt mạng thành công
+                isPaused = false;
+                setStatus("Đã kết nối lại! Đang tiếp tục truyền tải...", "#3b82f6");
+                sendCurrentFileSegments(); 
+            } else if (!isTransferring) {
+                // Bắt đầu tiến trình gửi lần đầu tiên
+                isTransferring = true;
+                currentSendingFileIdx = 0;
+                currentSendingOffset = 0;
+                currentSendingChunkIndex = 0;
+                setStatus("Đang truyền dữ liệu...", "#3b82f6");
+                setTimeout(() => { sendAllFilesSequentially(); }, 600);
+            }
         }
     };
     channel.onclose = () => { addLog(`Luồng [${channel.label}] đóng`); };
@@ -312,15 +334,19 @@ function setupSenderChannelEvents(channel) {
 
 function listenForAnswer(){
     const roomRef = ref(db, `rooms/${roomId}`);
+    if (unsubscribeAnswer) unsubscribeAnswer();
+    
     unsubscribeAnswer = onValue(roomRef, async(snapshot)=>{
         const data = snapshot.val();
         if(!data || !data.answer) return;
-        if(peerConnection.currentRemoteDescription || peerConnection.signalingState === "stable") return;
+        
+        // Chấp nhận cấu hình Remote Description mới kể cả khi đang kết nối lại (ICE Restart)
+        if(peerConnection.signalingState === "stable" && !isPaused) return;
 
         try {
-            if(unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
             startConnectionTimeout();
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            addLog("Đã đồng bộ thành công kênh phản hồi (Answer WebRTC)");
         } catch (err) { console.error(err); }
     });
 
@@ -336,14 +362,19 @@ function listenForAnswer(){
     });
 }
 
-// Hàm gửi nối đuôi tuần tự toàn bộ danh sách file gốc
+// Hàm quản lý vòng lặp gửi tuần tự toàn bộ danh sách file gốc
 async function sendAllFilesSequentially() {
     transferStartTime = Date.now();
     addLog(`Bắt đầu truyền tải tuần tự từng file nguyên mẫu trong danh sách...`);
 
-    for (let i = 0; i < selectedFilesArray.length; i++) {
-        const file = selectedFilesArray[i];
-        addLog(`[${i + 1}/${selectedFilesArray.length}] Đang gửi file: ${file.name} (${formatSize(file.size)})`);
+    for (; currentSendingFileIdx < selectedFilesArray.length; currentSendingFileIdx++) {
+        if (isPaused) return; // Ngắt tiến trình vòng lặp nếu phát hiện mất mạng
+
+        currentSendingOffset = 0;
+        currentSendingChunkIndex = 0;
+        
+        const file = selectedFilesArray[currentSendingFileIdx];
+        addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Đang gửi file: ${file.name} (${formatSize(file.size)})`);
         
         // Gửi tín hiệu báo bắt đầu một file mới (Metadata)
         dataChannels[0].send(JSON.stringify({
@@ -353,33 +384,8 @@ async function sendAllFilesSequentially() {
             totalChunks: Math.ceil(file.size / chunkSize)
         }));
 
-        let offset = 0;
-        let chunkIndex = 0;
-
-        while (offset < file.size) {
-            const currentChannel = dataChannels[chunkIndex % numChannels];
-
-            // Chống tràn bộ đệm WebRTC
-            if (currentChannel.bufferedAmount > 1024 * 1024) {
-                await new Promise(r => setTimeout(r, 20));
-                continue; 
-            }
-
-            const slice = file.slice(offset, offset + chunkSize);
-            const buffer = await slice.arrayBuffer();
-
-            const packet = new Uint8Array(4 + buffer.byteLength);
-            const view = new DataView(packet.buffer);
-            view.setUint32(0, chunkIndex); 
-            packet.set(new Uint8Array(buffer), 4);
-
-            currentChannel.send(packet);
-
-            offset += buffer.byteLength;
-            chunkIndex++;
-
-            updateSendProgress(offset, file.size, file.name, i + 1, selectedFilesArray.length);
-        }
+        await sendCurrentFileSegments();
+        if (isPaused) return; 
 
         // Đợi một khoảng ngắn trước khi gửi tín hiệu hoàn thành file này để chắc chắn data đã đi hết
         await new Promise(r => setTimeout(r, 100));
@@ -394,7 +400,7 @@ async function sendAllFilesSequentially() {
         addLog(`Đã gửi xong file: ${file.name}`);
     }
 
-    // Hoàn thành toàn bộ tiến trình phòng gửi
+    isTransferring = false;
     setStatus("Gửi thành công", "#22c55e");
     showToast("Đã gửi toàn bộ file thành công!");
 
@@ -402,6 +408,69 @@ async function sendAllFilesSequentially() {
         await cleanupRoom();
         resetTransfer();
     }, 4000);
+}
+
+// Hàm chịu trách nhiệm trực tiếp đẩy từng mảnh chunk dữ liệu của file hiện tại
+async function sendCurrentFileSegments() {
+    const file = selectedFilesArray[currentSendingFileIdx];
+    if (!file) return;
+
+    while (currentSendingOffset < file.size) {
+        if (isPaused) return; // Dừng ngay vòng lặp đẩy chunk nếu mạng lỗi
+
+        const currentChannel = dataChannels[currentSendingChunkIndex % numChannels];
+
+        if (!currentChannel || currentChannel.readyState !== "open") {
+            await new Promise(r => setTimeout(r, 50));
+            continue;
+        }
+
+        // Chống tràn bộ đệm WebRTC
+        if (currentChannel.bufferedAmount > 1024 * 1024) {
+            await new Promise(r => setTimeout(r, 20));
+            continue; 
+        }
+
+        const slice = file.slice(currentSendingOffset, currentSendingOffset + chunkSize);
+        const buffer = await slice.arrayBuffer();
+
+        const packet = new Uint8Array(4 + buffer.byteLength);
+        const view = new DataView(packet.buffer);
+        view.setUint32(0, currentSendingChunkIndex); 
+        packet.set(new Uint8Array(buffer), 4);
+
+        try {
+            currentChannel.send(packet);
+            currentSendingOffset += buffer.byteLength;
+            currentSendingChunkIndex++;
+            updateSendProgress(currentSendingOffset, file.size, file.name, currentSendingFileIdx + 1, selectedFilesArray.length);
+        } catch (e) {
+            console.error("Lỗi khi đẩy gói dữ liệu thô:", e);
+            return;
+        }
+    }
+}
+
+// Hàm kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
+async function initiateIceRestart() {
+    if (!isSender || !peerConnection || isPaused) return;
+    
+    isPaused = true;
+    openChannelsCount = 0;
+    setStatus("Đường truyền gián đoạn! Đang tìm cách kết nối lại...", "#facc15");
+    
+    try {
+        // Tạo Offer mới tích hợp cờ quét và cập nhật lại đường truyền ICE Restart
+        const offer = await peerConnection.createOffer({ iceRestart: true });
+        await peerConnection.setLocalDescription(offer);
+        
+        await update(ref(db, `rooms/${roomId}`), {
+            offer: { type: offer.type, sdp: offer.sdp }
+        });
+        addLog("Đã phát đi tín hiệu ICE Restart lên tổng đài Firebase.");
+    } catch (err) {
+        console.error("Lỗi khởi tạo cấu hình tái lập mạng:", err);
+    }
 }
 
 // =====================================================
@@ -440,7 +509,23 @@ async function joinAsReceiver(){
     }
 
     peerConnection = new RTCPeerConnection(rtcConfig);
+    bindReceiverEvents();
 
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    await update(ref(db, `rooms/${roomId}`), {
+        answer: { type: answer.type, sdp: answer.sdp },
+        status: "connected"
+    });
+
+    listenOfferCandidates();
+    listenForIceRestartOffer(); // Lắng nghe tín hiệu Restart từ máy gửi
+}
+
+function bindReceiverEvents() {
+    dataChannels = [];
     peerConnection.ondatachannel = (event) => {
         const channel = event.channel;
         channel.binaryType = "arraybuffer";
@@ -449,7 +534,10 @@ async function joinAsReceiver(){
         channel.onopen = () => {
             transferMode.textContent = `Kênh Nhận Stream`;
             setStatus("Đang nhận file...", "#3b82f6");
-            transferStartTime = Date.now();
+            if(isPaused) {
+                isPaused = false;
+                addLog("Đã thiết lập lại luồng nhận dữ liệu kế thừa thành công!");
+            }
         };
 
         channel.onmessage = handleIncomingMultiChannelData;
@@ -462,17 +550,6 @@ async function joinAsReceiver(){
             await set(candidateRef, event.candidate.toJSON());
         } catch (e) { console.error(e); }
     };
-
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-
-    await update(ref(db, `rooms/${roomId}`), {
-        answer: { type: answer.type, sdp: answer.sdp },
-        status: "connected"
-    });
-
-    listenOfferCandidates();
 }
 
 function listenOfferCandidates(){
@@ -488,6 +565,37 @@ function listenOfferCandidates(){
     });
 }
 
+// Phía máy nhận lắng nghe xem máy gửi có thực hiện Reset mạng (ICE Restart) hay không
+function listenForIceRestartOffer() {
+    const roomRef = ref(db, `rooms/${roomId}`);
+    if (unsubscribeOffer) unsubscribeOffer();
+
+    unsubscribeOffer = onValue(roomRef, async (snapshot) => {
+        const data = snapshot.val();
+        if (!data || !data.offer) return;
+
+        // Nếu chuỗi SDP có sự thay đổi (chứa mã kết nối mạng mới từ máy gửi)
+        if (peerConnection.remoteDescription && data.offer.sdp !== peerConnection.remoteDescription.sdp) {
+            addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
+            isPaused = true;
+            setStatus("Đang kết nối lại...", "#facc15");
+
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+
+                await update(ref(db, `rooms/${roomId}`), {
+                    answer: { type: answer.type, sdp: answer.sdp }
+                });
+                addLog("Đã trả về cấu hình xác nhận mạng mới thành công.");
+            } catch (err) {
+                console.error("Lỗi đồng bộ cấu hình ICE Restart phía nhận:", err);
+            }
+        }
+    });
+}
+
 // =====================================================
 // RECEIVER: STREAM RECEIVE & AUTO DOWNLOAD ORIGINALS
 // =====================================================
@@ -496,13 +604,18 @@ function handleIncomingMultiChannelData(event) {
         const msg = JSON.parse(event.data);
 
         if (msg.type === "metadata") {
-            expectedFileName = msg.name;
-            expectedFileSize = msg.size;
-            totalExpectedChunks = msg.totalChunks;
-            receiveBuffers = {};
-            receivedChunksCount = 0;
-            receiveSize = 0;
-            addLog(`Đang nhận file: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
+            // Chỉ khởi tạo lại bộ đệm nếu nhận được file hoàn toàn mới
+            if (expectedFileName !== msg.name) {
+                expectedFileName = msg.name;
+                expectedFileSize = msg.size;
+                totalExpectedChunks = msg.totalChunks;
+                receiveBuffers = {};
+                receivedChunksCount = 0;
+                receiveSize = 0;
+                addLog(`Đang nhận file mới: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
+            } else {
+                addLog(`Khớp thông tin Metadata cũ. Đang tiếp tục tải mảnh kế thừa...`);
+            }
             return;
         }
 
@@ -518,6 +631,7 @@ function handleIncomingMultiChannelData(event) {
     const chunkIndex = view.getUint32(0); 
     const rawData = buffer.slice(4); 
 
+    // Bộ đệm Map Key giúp chống ghi đè trùng lặp hoặc sai lệch thứ tự chunk khi mạng chập chờn
     if (!receiveBuffers[chunkIndex]) {
         receiveBuffers[chunkIndex] = rawData;
         receivedChunksCount++;
@@ -526,7 +640,6 @@ function handleIncomingMultiChannelData(event) {
     }
 }
 
-// Xử lý tạo lệnh tải xuống trực tiếp tệp tin gốc ngay khi nhận xong (Không bung/giải nén)
 function saveReceivedFileDirectly() {
     if (receivedChunksCount === 0) return;
     
@@ -541,7 +654,6 @@ function saveReceivedFileDirectly() {
         }
     }
 
-    // Xuất thẳng file gốc từ mảng buffer thô nhận được
     const receivedBlob = new Blob(sortedBuffers);
     const fileObjectURL = URL.createObjectURL(receivedBlob);
     
@@ -557,11 +669,11 @@ function saveReceivedFileDirectly() {
     addLog(`Đã tải xuống thành công file gốc: ${expectedFileName}`);
     showToast(`Đã nhận xong: ${expectedFileName}`);
     
-    // Reset bộ đệm nhận để chuẩn bị đón nhận file tiếp theo trong hàng đợi tuần tự
     receiveBuffers = {};
     receivedChunksCount = 0;
     totalExpectedChunks = 0;
     receiveSize = 0;
+    expectedFileName = ""; // Xóa tên cũ để sẵn sàng đón nhận tệp tin tiếp theo hoàn toàn sạch sẽ
 }
 
 // =====================================================
@@ -620,10 +732,16 @@ function watchConnectionState(){
     peerConnection.onconnectionstatechange = ()=>{
         const state = peerConnection.connectionState;
         addLog(`Trạng thái kênh: ${state.toUpperCase()}`);
+        
         if(state === "connected") {
             clearConnectionTimeout();
-        } else if (state === "failed" || state === "disconnected") {
-            setStatus("Ngắt kết nối", "#ef4444");
+        } else if (state === "disconnected" || state === "failed") {
+            if (isSender) {
+                initiateIceRestart(); // Nếu là người gửi, kích hoạt quy trình nối lại mạng
+            } else {
+                isPaused = true;
+                setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi mạng...", "#facc15");
+            }
         }
     };
 }
@@ -636,7 +754,7 @@ function startConnectionTimeout(){
             setStatus("Hết thời gian chờ", "#ef4444");
             showToast("Hết hạn thời gian chờ kết nối");
         }
-    }, 60000); 
+    }, 90000); // Tăng thời gian chờ lên 90 giây để hai bên có đủ thời gian bắt sóng lại
 }
 
 function clearConnectionTimeout(){
@@ -663,6 +781,12 @@ function resetTransfer(){
     expectedFileName = "";
     selectedFilesArray = [];
     
+    isTransferring = false;
+    isPaused = false;
+    currentSendingFileIdx = 0;
+    currentSendingOffset = 0;
+    currentSendingChunkIndex = 0;
+    
     progressBar.style.width = "0%";
     progressPercent.textContent = "0%";
     transferSize.textContent = "0 MB";
@@ -673,6 +797,7 @@ function resetTransfer(){
     fileName.textContent = "Chưa có file nào được chọn";
     
     if(unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
+    if(unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
 }
 
 window.addEventListener("beforeunload", async()=>{ try{ await cleanupRoom(); }catch(e){} });
