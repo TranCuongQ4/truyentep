@@ -154,7 +154,6 @@ function showSuccessModal(message, callback) {
     customSuccessTitle.textContent = message;
     modalWrapper.classList.add("active");
     
-    // Xóa sự kiện cũ tránh trùng lặp khi gọi nhiều lần
     const newBtn = customSuccessBtn.cloneNode(true);
     customSuccessBtn.parentNode.replaceChild(newBtn, customSuccessBtn);
     
@@ -387,6 +386,7 @@ function setupSenderChannelEvents(channel) {
             if (isPaused) {
                 isPaused = false;
                 setStatus("Đã kết nối lại! Đang tiếp tục truyền tải...", "#3b82f6");
+                // Đẩy tiếp phần dữ liệu còn sót lại của file hiện tại
                 sendCurrentFileSegments(); 
             } else if (!isTransferring) {
                 isTransferring = true;
@@ -401,7 +401,6 @@ function setupSenderChannelEvents(channel) {
     channel.onclose = () => { addLog(`Luồng [${channel.label}] đóng`); };
     channel.onerror = (err) => { console.error(err); };
     
-    // Lắng nghe tín hiệu bắt tay (ACK) phản hồi ngược từ bên nhận
     channel.onmessage = (event) => {
         if (typeof event.data === "string") {
             const msg = JSON.parse(event.data);
@@ -450,18 +449,24 @@ function listenForAnswer(){
     });
 }
 
-// Hàm quản lý vòng lặp gửi tuần tự từng file một có bắt tay đồng bộ chặt chẽ
+// Hàm quản lý vòng lặp gửi tuần tự từng file một
 async function sendAllFilesSequentially() {
     transferStartTime = Date.now();
     addLog(`Bắt đầu truyền tải tuần tự - Kiểm soát bắt tay ACK từng file...`);
 
-    // Tạo một Promise để kiểm soát khi nào toàn bộ chuỗi nhận kết thúc an toàn từ bên nhận
     const allReceivedPromise = new Promise((resolve) => {
         allReceivedResolver = resolve;
     });
 
     for (; currentSendingFileIdx < selectedFilesArray.length; currentSendingFileIdx++) {
-        if (isPaused) return; 
+        // Nếu đang bị Pause (mất mạng) thì dừng vòng lặp tại đây để giữ đúng số Index file
+        if (isPaused) {
+            await new Promise(r => {
+                const interval = setInterval(() => {
+                    if (!isPaused) { clearInterval(interval); r(); }
+                }, 500);
+            });
+        }
 
         currentSendingOffset = 0;
         currentSendingChunkIndex = 0;
@@ -469,12 +474,11 @@ async function sendAllFilesSequentially() {
         const file = selectedFilesArray[currentSendingFileIdx];
         addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Bắt đầu truyền file: ${file.name} (${formatSize(file.size)})`);
         
-        // Tạo Promise chờ tín hiệu lưu file xong từ bên nhận
         const fileAckPromise = new Promise((resolve) => {
             fileAckResolver = resolve;
         });
 
-        // Luôn gửi Metadata qua luồng cố định đầu tiên
+        // Gửi Metadata qua luồng cố định đầu tiên
         dataChannels[0].send(JSON.stringify({
             type: "metadata",
             name: file.name,
@@ -484,12 +488,18 @@ async function sendAllFilesSequentially() {
             isLastFile: (currentSendingFileIdx === selectedFilesArray.length - 1)
         }));
 
-        // Chạy hàm đẩy dữ liệu nhị phân lên các luồng
         await sendCurrentFileSegments();
-        if (isPaused) return; 
+        
+        // Nếu trong quá trình gửi bị rớt mạng đột ngột, treo luồng tại đây chờ kết nối lại xong xuôi
+        if (isPaused) {
+            await new Promise(r => {
+                const interval = setInterval(() => {
+                    if (!isPaused) { clearInterval(interval); r(); }
+                }, 500);
+            });
+        }
 
-        // Đợi một khoảng ngắn 30ms để toàn bộ các luồng con xả sạch hàng đợi dữ liệu nhị phân trước khi phát lệnh Complete
-        await new Promise(r => setTimeout(r, 30));
+        await new Promise(r => setTimeout(r, 40));
 
         dataChannels.forEach(chan => {
             if (chan.readyState === "open") {
@@ -506,16 +516,13 @@ async function sendAllFilesSequentially() {
 
     addLog("Đã truyền xong toàn bộ danh sách file gốc! Chờ xác nhận an toàn từ bên nhận để đóng Firebase...");
     
-    // Treo luồng chờ tín hiệu máy nhận xử lý hoàn tất file cuối cùng để giải phóng phòng
     await allReceivedPromise;
 
     isTransferring = false;
     setStatus("Gửi thành công", "#22c55e");
     
-    // Sau khi chắc chắn máy nhận đã lấy đủ 100% dữ liệu, tiến hành xóa phòng an toàn
     await cleanupRoom();
 
-    // Hiện bảng xanh ngọc thông báo cho bên Gửi và reset giao diện sau khi đóng bảng
     showSuccessModal("🎁 Đã Hoàn Tất Gửi File 🎁", () => {
         resetTransfer();
     });
@@ -536,7 +543,6 @@ async function sendCurrentFileSegments() {
             continue;
         }
 
-        // Tối ưu bộ đệm chịu tải cao để đạt tốc độ tối đa
         if (currentChannel.bufferedAmount > 2 * 1024 * 1024) {
             await new Promise(r => setTimeout(r, 2)); 
             continue; 
@@ -562,7 +568,7 @@ async function sendCurrentFileSegments() {
     }
 }
 
-// Hàm kích kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
+// Hàm kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
 async function initiateIceRestart() {
     if (!isSender || !peerConnection || isPaused) return;
     
@@ -634,7 +640,6 @@ async function joinAsReceiver(){
     listenForIceRestartOffer(); 
 }
 
-// Quản lý biến kiểm soát thứ tự nhận để truyền phản hồi chuẩn xác
 let currentFileIndex = 0;
 let isLastFileSignal = false;
 
@@ -756,7 +761,6 @@ function handleIncomingMultiChannelData(event, activeChannel) {
 }
 
 function saveReceivedFileDirectly(activeChannel) {
-    // Chỉ cho phép ghi file khi số lượng chunk nhận về khớp chính xác với Metadata kỳ vọng
     if (receivedChunksCount === 0 || receivedChunksCount < totalExpectedChunks) return;
     
     addLog(`Đang tiến hành ghi dữ liệu xuống thiết bị: ${expectedFileName}`);
@@ -783,18 +787,15 @@ function saveReceivedFileDirectly(activeChannel) {
     addLog(`Đã nhận và lưu ổ đĩa thành công: ${expectedFileName}`);
     showToast(`Đã lưu xong: ${expectedFileName}`);
     
-    // Reset bộ đệm file hiện tại để giải phóng dung lượng bộ nhớ RAM lập tức
     receiveBuffers = {};
     receivedChunksCount = 0;
     totalExpectedChunks = 0;
     receiveSize = 0;
     expectedFileName = ""; 
 
-    // Gửi tín hiệu bắt tay (ACK) ngược lại cho máy gửi biết để nhảy sang file kế tiếp
     if (activeChannel && activeChannel.readyState === "open") {
         activeChannel.send(JSON.stringify({ type: "file_ack", index: currentFileIndex }));
         
-        // Nếu đây là file cuối cùng trong danh sách, gửi thêm tín hiệu chốt chặn kết thúc
         if (isLastFileSignal) {
             addLog("Đã nhận đủ toàn bộ danh sách file! Phát tín hiệu kết thúc an toàn đến máy gửi...");
             setTimeout(() => {
@@ -802,7 +803,6 @@ function saveReceivedFileDirectly(activeChannel) {
                     activeChannel.send(JSON.stringify({ type: "all_files_received" }));
                 }
                 
-                // Hiện bảng xanh ngọc thông báo cho bên Nhận biết đã hoàn thành
                 showSuccessModal("🎁 Đã Nhận Đủ Dữ Liệu 🎁", () => {
                     resetTransfer();
                 });
@@ -829,6 +829,9 @@ function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     remainingTime.textContent = formatTime(remain);
 }
 
+// =====================================================
+// RECEIVE PROGRESS HELPERS
+// =====================================================
 function updateReceiveProgress(){
     if(!expectedFileSize) return;
     const percent = Math.floor(receiveSize / expectedFileSize * 100);
