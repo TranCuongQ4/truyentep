@@ -63,8 +63,8 @@ let isSender = false;
 let peerConnection = null;
 let html5QrcodeScanner = null;
 
-// Cấu hình truyền tải đa luồng SCTP tăng tốc độ băng thông tối đa
-const numChannels = 3; 
+// Giữ cấu hình đa luồng tối ưu chịu tải mạng cực tốt
+const numChannels = 4; 
 let dataChannels = [];
 let openChannelsCount = 0;
 
@@ -86,7 +86,8 @@ let currentSendingFileIdx = 0;
 let currentSendingOffset = 0;
 let currentSendingChunkIndex = 0;
 
-const chunkSize = 16 * 1024; // Kích thước khối chunk dữ liệu tiêu chuẩn WebRTC 16KB
+// Giữ kích thước khối cực đại 64KB để giữ vững băng thông truyền dữ liệu lớn
+const chunkSize = 64 * 1024; 
 
 const rtcConfig = {
     iceServers: [
@@ -277,8 +278,14 @@ async function createSenderPeer(){
     dataChannels = [];
     openChannelsCount = 0;
 
+    // SỬA LỖI FILE LẠ: Bật ordered: true để kiểm soát gói tin điều khiển luôn đi đúng lộ trình tuần tự,
+    // đồng thời loại bỏ maxRetransmits để đảm bảo dữ liệu không bị thất thoát gây lỗi ngầm.
+    const channelOptions = {
+        ordered: true
+    };
+
     for (let i = 0; i < numChannels; i++) {
-        const channel = peerConnection.createDataChannel(`fileTransfer_${i}`, { ordered: true });
+        const channel = peerConnection.createDataChannel(`fileTransfer_${i}`, channelOptions);
         channel.binaryType = "arraybuffer";
         setupSenderChannelEvents(channel);
         dataChannels.push(channel);
@@ -299,7 +306,7 @@ async function createSenderPeer(){
         offer: { type: offer.type, sdp: offer.sdp }
     });
 
-    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP song parallel`);
+    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP song parallel [HIGH STABLE MODE]`);
     listenForAnswer();
 }
 
@@ -337,9 +344,7 @@ function listenForAnswer(){
         const data = snapshot.val();
         if(!data || !data.answer) return;
         
-        // CHẶN LỖI: Nếu trạng thái báo hiệu đã stable và KHÔNG trong quá trình kết nối lại, bỏ qua không setRemoteDescription nữa
         if (peerConnection.signalingState === "stable" && !isPaused) return;
-        // Nếu đang trong quá trình thương lượng lại (have-local-offer) thì mới tiến hành xử lý cấu hình answer nhận được
         if (peerConnection.signalingState !== "have-local-offer") return;
 
         try {
@@ -364,7 +369,7 @@ function listenForAnswer(){
 // Hàm quản lý vòng lặp gửi tuần tự toàn bộ danh sách file gốc
 async function sendAllFilesSequentially() {
     transferStartTime = Date.now();
-    addLog(`Bắt đầu truyền tải tuần tự từng file nguyên mẫu trong danh sách...`);
+    addLog(`Bắt đầu truyền tải tuần tự sạch tài nguyên mạng...`);
 
     for (; currentSendingFileIdx < selectedFilesArray.length; currentSendingFileIdx++) {
         if (isPaused) return; 
@@ -375,6 +380,7 @@ async function sendAllFilesSequentially() {
         const file = selectedFilesArray[currentSendingFileIdx];
         addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Đang gửi file: ${file.name} (${formatSize(file.size)})`);
         
+        // Luôn gửi Metadata qua luồng cố định đầu tiên
         dataChannels[0].send(JSON.stringify({
             type: "metadata",
             name: file.name,
@@ -385,7 +391,8 @@ async function sendAllFilesSequentially() {
         await sendCurrentFileSegments();
         if (isPaused) return; 
 
-        await new Promise(r => setTimeout(r, 100));
+        // Đợi một khoảng ngắn 50ms để toàn bộ các luồng con xả sạch hàng đợi dữ liệu nhị phân trước khi gửi lệnh Complete
+        await new Promise(r => setTimeout(r, 50));
 
         dataChannels.forEach(chan => {
             if (chan.readyState === "open") {
@@ -406,7 +413,7 @@ async function sendAllFilesSequentially() {
     }, 4000);
 }
 
-// Hàm chịu trách nhiệm trực tiếp đẩy từng mảnh chunk dữ liệu của file hiện tại
+// Hàm chịu trách nhiệm trực tiếp đẩy cực nhanh từng mảnh chunk dữ liệu của file hiện tại
 async function sendCurrentFileSegments() {
     const file = selectedFilesArray[currentSendingFileIdx];
     if (!file) return;
@@ -417,12 +424,13 @@ async function sendCurrentFileSegments() {
         const currentChannel = dataChannels[currentSendingChunkIndex % numChannels];
 
         if (!currentChannel || currentChannel.readyState !== "open") {
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 5));
             continue;
         }
 
-        if (currentChannel.bufferedAmount > 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 20));
+        // Tối ưu bộ đệm chịu tải cao để đạt max speed mà không lo tràn RAM thiết bị nhận
+        if (currentChannel.bufferedAmount > 2 * 1024 * 1024) {
+            await new Promise(r => setTimeout(r, 2)); 
             continue; 
         }
 
@@ -440,7 +448,7 @@ async function sendCurrentFileSegments() {
             currentSendingChunkIndex++;
             updateSendProgress(currentSendingOffset, file.size, file.name, currentSendingFileIdx + 1, selectedFilesArray.length);
         } catch (e) {
-            console.error("Lỗi khi đẩy gói dữ liệu thô:", e);
+            console.error("Lỗi đẩy gói dữ liệu:", e);
             return;
         }
     }
@@ -526,7 +534,7 @@ function bindReceiverEvents() {
         dataChannels.push(channel);
         
         channel.onopen = () => {
-            transferMode.textContent = `Kênh Nhận Stream`;
+            transferMode.textContent = `Kênh Nhận Toàn Phần`;
             setStatus("Đang nhận file...", "#3b82f6");
             if(isPaused) {
                 isPaused = false;
@@ -568,8 +576,6 @@ function listenForIceRestartOffer() {
         if (!data || !data.offer) return;
 
         if (peerConnection.remoteDescription && data.offer.sdp !== peerConnection.remoteDescription.sdp) {
-            
-            // CHẶN LỖI: Nếu trạng thái phía máy Nhận đang ổn định (stable) và không có tín hiệu đứt mạng, bỏ qua cấu hình trùng lặp
             if (peerConnection.signalingState === "stable" && !isPaused) return;
 
             addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
@@ -608,8 +614,6 @@ function handleIncomingMultiChannelData(event) {
                 receivedChunksCount = 0;
                 receiveSize = 0;
                 addLog(`Đang nhận file mới: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
-            } else {
-                addLog(`Khớp thông tin Metadata cũ. Đang tiếp tục tải mảnh kế thừa...`);
             }
             return;
         }
@@ -635,14 +639,13 @@ function handleIncomingMultiChannelData(event) {
 }
 
 function saveReceivedFileDirectly() {
-    if (receivedChunksCount === 0) return;
+    // SỬA LỖI NGẦM: Chỉ cho phép ghi file khi số lượng chunk nhận về khớp chính xác với Metadata kỳ vọng
+    if (receivedChunksCount === 0 || receivedChunksCount < totalExpectedChunks) return;
     
     addLog(`Đang ghi file nguyên mẫu xuống ổ đĩa: ${expectedFileName}`);
     
     const sortedBuffers = [];
-    const totalKeys = Object.keys(receiveBuffers).length;
-    
-    for (let i = 0; i < totalKeys; i++) {
+    for (let i = 0; i < totalExpectedChunks; i++) {
         if (receiveBuffers[i]) {
             sortedBuffers.push(receiveBuffers[i]);
         }
@@ -663,6 +666,7 @@ function saveReceivedFileDirectly() {
     addLog(`Đã tải xuống thành công file gốc: ${expectedFileName}`);
     showToast(`Đã nhận xong: ${expectedFileName}`);
     
+    // Reset sạch sẽ cấu trúc để tránh rò rỉ RAM hoặc ghi đè file rác txt
     receiveBuffers = {};
     receivedChunksCount = 0;
     totalExpectedChunks = 0;
