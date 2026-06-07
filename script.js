@@ -277,7 +277,6 @@ async function createSenderPeer(){
     dataChannels = [];
     openChannelsCount = 0;
 
-    // Khởi tạo các kênh dữ liệu luồng
     for (let i = 0; i < numChannels; i++) {
         const channel = peerConnection.createDataChannel(`fileTransfer_${i}`, { ordered: true });
         channel.binaryType = "arraybuffer";
@@ -313,12 +312,10 @@ function setupSenderChannelEvents(channel) {
             transferMode.textContent = `${numChannels} Kênh Gửi`;
             
             if (isPaused) {
-                // Phục hồi kết nối sau khi rớt mạng thành công
                 isPaused = false;
                 setStatus("Đã kết nối lại! Đang tiếp tục truyền tải...", "#3b82f6");
                 sendCurrentFileSegments(); 
             } else if (!isTransferring) {
-                // Bắt đầu tiến trình gửi lần đầu tiên
                 isTransferring = true;
                 currentSendingFileIdx = 0;
                 currentSendingOffset = 0;
@@ -340,8 +337,10 @@ function listenForAnswer(){
         const data = snapshot.val();
         if(!data || !data.answer) return;
         
-        // Chấp nhận cấu hình Remote Description mới kể cả khi đang kết nối lại (ICE Restart)
-        if(peerConnection.signalingState === "stable" && !isPaused) return;
+        // CHẶN LỖI: Nếu trạng thái báo hiệu đã stable và KHÔNG trong quá trình kết nối lại, bỏ qua không setRemoteDescription nữa
+        if (peerConnection.signalingState === "stable" && !isPaused) return;
+        // Nếu đang trong quá trình thương lượng lại (have-local-offer) thì mới tiến hành xử lý cấu hình answer nhận được
+        if (peerConnection.signalingState !== "have-local-offer") return;
 
         try {
             startConnectionTimeout();
@@ -368,7 +367,7 @@ async function sendAllFilesSequentially() {
     addLog(`Bắt đầu truyền tải tuần tự từng file nguyên mẫu trong danh sách...`);
 
     for (; currentSendingFileIdx < selectedFilesArray.length; currentSendingFileIdx++) {
-        if (isPaused) return; // Ngắt tiến trình vòng lặp nếu phát hiện mất mạng
+        if (isPaused) return; 
 
         currentSendingOffset = 0;
         currentSendingChunkIndex = 0;
@@ -376,7 +375,6 @@ async function sendAllFilesSequentially() {
         const file = selectedFilesArray[currentSendingFileIdx];
         addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Đang gửi file: ${file.name} (${formatSize(file.size)})`);
         
-        // Gửi tín hiệu báo bắt đầu một file mới (Metadata)
         dataChannels[0].send(JSON.stringify({
             type: "metadata",
             name: file.name,
@@ -387,10 +385,8 @@ async function sendAllFilesSequentially() {
         await sendCurrentFileSegments();
         if (isPaused) return; 
 
-        // Đợi một khoảng ngắn trước khi gửi tín hiệu hoàn thành file này để chắc chắn data đã đi hết
         await new Promise(r => setTimeout(r, 100));
 
-        // Báo kết thúc thành công 1 file đơn lẻ
         dataChannels.forEach(chan => {
             if (chan.readyState === "open") {
                 chan.send(JSON.stringify({ type: "file_complete" }));
@@ -416,7 +412,7 @@ async function sendCurrentFileSegments() {
     if (!file) return;
 
     while (currentSendingOffset < file.size) {
-        if (isPaused) return; // Dừng ngay vòng lặp đẩy chunk nếu mạng lỗi
+        if (isPaused) return; 
 
         const currentChannel = dataChannels[currentSendingChunkIndex % numChannels];
 
@@ -425,7 +421,6 @@ async function sendCurrentFileSegments() {
             continue;
         }
 
-        // Chống tràn bộ đệm WebRTC
         if (currentChannel.bufferedAmount > 1024 * 1024) {
             await new Promise(r => setTimeout(r, 20));
             continue; 
@@ -460,7 +455,6 @@ async function initiateIceRestart() {
     setStatus("Đường truyền gián đoạn! Đang tìm cách kết nối lại...", "#facc15");
     
     try {
-        // Tạo Offer mới tích hợp cờ quét và cập nhật lại đường truyền ICE Restart
         const offer = await peerConnection.createOffer({ iceRestart: true });
         await peerConnection.setLocalDescription(offer);
         
@@ -521,7 +515,7 @@ async function joinAsReceiver(){
     });
 
     listenOfferCandidates();
-    listenForIceRestartOffer(); // Lắng nghe tín hiệu Restart từ máy gửi
+    listenForIceRestartOffer(); 
 }
 
 function bindReceiverEvents() {
@@ -565,7 +559,6 @@ function listenOfferCandidates(){
     });
 }
 
-// Phía máy nhận lắng nghe xem máy gửi có thực hiện Reset mạng (ICE Restart) hay không
 function listenForIceRestartOffer() {
     const roomRef = ref(db, `rooms/${roomId}`);
     if (unsubscribeOffer) unsubscribeOffer();
@@ -574,8 +567,11 @@ function listenForIceRestartOffer() {
         const data = snapshot.val();
         if (!data || !data.offer) return;
 
-        // Nếu chuỗi SDP có sự thay đổi (chứa mã kết nối mạng mới từ máy gửi)
         if (peerConnection.remoteDescription && data.offer.sdp !== peerConnection.remoteDescription.sdp) {
+            
+            // CHẶN LỖI: Nếu trạng thái phía máy Nhận đang ổn định (stable) và không có tín hiệu đứt mạng, bỏ qua cấu hình trùng lặp
+            if (peerConnection.signalingState === "stable" && !isPaused) return;
+
             addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
             isPaused = true;
             setStatus("Đang kết nối lại...", "#facc15");
@@ -604,7 +600,6 @@ function handleIncomingMultiChannelData(event) {
         const msg = JSON.parse(event.data);
 
         if (msg.type === "metadata") {
-            // Chỉ khởi tạo lại bộ đệm nếu nhận được file hoàn toàn mới
             if (expectedFileName !== msg.name) {
                 expectedFileName = msg.name;
                 expectedFileSize = msg.size;
@@ -631,7 +626,6 @@ function handleIncomingMultiChannelData(event) {
     const chunkIndex = view.getUint32(0); 
     const rawData = buffer.slice(4); 
 
-    // Bộ đệm Map Key giúp chống ghi đè trùng lặp hoặc sai lệch thứ tự chunk khi mạng chập chờn
     if (!receiveBuffers[chunkIndex]) {
         receiveBuffers[chunkIndex] = rawData;
         receivedChunksCount++;
@@ -673,7 +667,7 @@ function saveReceivedFileDirectly() {
     receivedChunksCount = 0;
     totalExpectedChunks = 0;
     receiveSize = 0;
-    expectedFileName = ""; // Xóa tên cũ để sẵn sàng đón nhận tệp tin tiếp theo hoàn toàn sạch sẽ
+    expectedFileName = ""; 
 }
 
 // =====================================================
@@ -737,7 +731,7 @@ function watchConnectionState(){
             clearConnectionTimeout();
         } else if (state === "disconnected" || state === "failed") {
             if (isSender) {
-                initiateIceRestart(); // Nếu là người gửi, kích hoạt quy trình nối lại mạng
+                initiateIceRestart(); 
             } else {
                 isPaused = true;
                 setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi mạng...", "#facc15");
@@ -754,7 +748,7 @@ function startConnectionTimeout(){
             setStatus("Hết thời gian chờ", "#ef4444");
             showToast("Hết hạn thời gian chờ kết nối");
         }
-    }, 90000); // Tăng thời gian chờ lên 90 giây để hai bên có đủ thời gian bắt sóng lại
+    }, 90000); 
 }
 
 function clearConnectionTimeout(){
