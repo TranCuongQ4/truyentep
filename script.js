@@ -144,7 +144,6 @@ async function getTurnixIceConfig() {
     addLog("🔄 Đang lấy cấu hình TURN...");
     
     try {
-        // Thử lấy từ Worker (Turnix)
         const response = await fetch('https://truyendata.cuongprovui.workers.dev/', {
             method: 'GET',
             headers: {
@@ -155,7 +154,6 @@ async function getTurnixIceConfig() {
         if (response.ok) {
             const data = await response.json();
             if (data.iceServers && data.iceServers.length > 0) {
-                // Kiểm tra xem có TURN server không
                 const hasTurn = data.iceServers.some(s => 
                     s.urls && s.urls.some(u => u.startsWith('turn:') || u.startsWith('turns:'))
                 );
@@ -182,7 +180,6 @@ async function getTurnixIceConfig() {
         addLog(`⚠️ Worker error: ${e.message}, fallback sang Metered.ca`);
     }
     
-    // Fallback sang Metered.ca
     addLog("🔄 Dùng Metered.ca TURN server (đã test ổn định)");
     cachedIceConfig = {
         config: METERED_CONFIG,
@@ -484,7 +481,6 @@ function setupSenderChannelEvents(channel) {
         addLog(`Luồng [${channel.label}] đồng bộ mở`);
         
         if (openChannelsCount === numChannels && isSender) {
-            // Tắt lắng nghe tín hiệu trên Firebase ngay khi các kênh truyền tải vật lý đã mở hoàn toàn
             if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
             if (unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates(); unsubscribeReceiverCandidates = null; }
             
@@ -526,26 +522,24 @@ function setupSenderChannelEvents(channel) {
 }
 
 function listenForAnswer(){
-    const roomRef = ref(db, `rooms/${roomId}`);
-    if (unsubscribeAnswer) unsubscribeAnswer();
+    if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
+    if (unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates(); unsubscribeReceiverCandidates = null; }
     
+    const roomRef = ref(db, `rooms/${roomId}`);
     unsubscribeAnswer = onValue(roomRef, async(snapshot)=>{
         const data = snapshot.val();
         if(!data || !data.answer) return;
-        
         if (!peerConnection) return;
         if (isAnswering) return;
         
         const signalingState = peerConnection.signalingState;
-        if (signalingState !== "have-local-offer") {
-            return; 
-        }
+        if (signalingState !== "have-local-offer") return;
 
         isAnswering = true;
         try {
             startConnectionTimeout();
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            addLog("✅ Đã đồng bộ thành công Answer WebRTC");
+            addLog("✅ Đã đồng bộ Answer WebRTC");
         } catch (err) { 
             console.error("Lỗi setRemoteDescription:", err);
         } finally {
@@ -553,15 +547,20 @@ function listenForAnswer(){
         }
     });
 
-    if (unsubscribeReceiverCandidates) unsubscribeReceiverCandidates();
     unsubscribeReceiverCandidates = onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
+        if (!peerConnection || !peerConnection.remoteDescription) return;
+        
         snapshot.forEach(async(child)=>{
-            const candidate = child.val();
-            try{
-                if (peerConnection && peerConnection.remoteDescription) {
+            try {
+                const candidate = child.val();
+                if (candidate) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
-            }catch(err){ console.error(err); }
+            } catch(err){ 
+                if (err.name !== 'OperationError') {
+                    console.error("Lỗi add ICE candidate:", err);
+                }
+            }
         });
     });
 }
@@ -785,7 +784,6 @@ function bindReceiverEvents() {
         dataChannels.push(channel);
         
         channel.onopen = () => {
-            // Khi phía Nhận đã mở cổng kết nối thành công, ngắt toàn bộ lắng nghe từ Firebase để chống lặp loop
             if (unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
             if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
             
@@ -812,23 +810,30 @@ function bindReceiverEvents() {
 }
 
 function listenOfferCandidates(){
-    if (unsubscribeSenderCandidates) unsubscribeSenderCandidates();
+    if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
+    
     unsubscribeSenderCandidates = onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
+        if (!peerConnection || !peerConnection.remoteDescription) return;
+        
         snapshot.forEach(async(child)=>{
-            const candidate = child.val();
-            try{
-                if (peerConnection && peerConnection.remoteDescription) {
+            try {
+                const candidate = child.val();
+                if (candidate) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
-            }catch(err){ console.error(err); }
+            } catch(err){ 
+                if (err.name !== 'OperationError') {
+                    console.error("Lỗi add ICE candidate:", err);
+                }
+            }
         });
     });
 }
 
 function listenForIceRestartOffer() {
-    const roomRef = ref(db, `rooms/${roomId}`);
-    if (unsubscribeOffer) unsubscribeOffer();
+    if (unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
 
+    const roomRef = ref(db, `rooms/${roomId}`);
     unsubscribeOffer = onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
         if (!data || !data.offer) return;
@@ -840,7 +845,7 @@ function listenForIceRestartOffer() {
         const signalingState = peerConnection.signalingState;
         if (signalingState !== "have-local-offer" && signalingState !== "stable") return;
 
-        addLog("Phát hiện máy gửi đang ICE Restart...");
+        addLog("Phát hiện ICE Restart...");
         isPaused = true;
         setStatus("Đang kết nối lại...", "#facc15");
 
@@ -852,9 +857,9 @@ function listenForIceRestartOffer() {
             await update(ref(db, `rooms/${roomId}`), {
                 answer: { type: answer.type, sdp: answer.sdp }
             });
-            addLog("Đã trả về cấu hình mới thành công.");
+            addLog("✅ Đã trả về cấu hình mới");
         } catch (err) {
-            console.error("Lỗi ICE Restart phía nhận:", err);
+            console.error("Lỗi ICE Restart:", err);
         }
     });
 }
@@ -1049,6 +1054,32 @@ async function cleanupRoom(){
 }
 
 function resetTransfer(){
+    // Cleanup listeners đúng cách
+    if (unsubscribeAnswer) { 
+        unsubscribeAnswer(); 
+        unsubscribeAnswer = null; 
+    }
+    if (unsubscribeOffer) { 
+        unsubscribeOffer(); 
+        unsubscribeOffer = null; 
+    }
+    if (unsubscribeSenderCandidates) { 
+        unsubscribeSenderCandidates(); 
+        unsubscribeSenderCandidates = null; 
+    }
+    if (unsubscribeReceiverCandidates) { 
+        unsubscribeReceiverCandidates(); 
+        unsubscribeReceiverCandidates = null; 
+    }
+    
+    // Đóng peer connection nếu còn
+    if (peerConnection) {
+        try {
+            peerConnection.close();
+        } catch(e) {}
+        peerConnection = null;
+    }
+    
     dataChannels = [];
     openChannelsCount = 0;
     receiveBuffers = {};
@@ -1075,11 +1106,6 @@ function resetTransfer(){
     transferMode.textContent = "Idle";
     qrArea.style.display = "none";
     fileName.textContent = "Chưa có file nào được chọn";
-    
-    if(unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
-    if(unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
-    if(unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
-    if(unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates(); unsubscribeReceiverCandidates = null; }
 }
 
 window.addEventListener("beforeunload", async()=>{ try{ await cleanupRoom(); }catch(e){} });
