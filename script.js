@@ -1079,11 +1079,14 @@ function watchConnectionState(){
         if(state === "connected") {
             clearConnectionTimeout();
         } else if (state === "disconnected" || state === "failed") {
-            if (isSender) {
-                initiateIceRestart(); 
-            } else {
-                isPaused = true;
-                setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi...", "#facc15");
+            // Chỉ ICE Restart nếu đang trong quá trình truyền
+            if (isTransferring) {
+                if (isSender) {
+                    initiateIceRestart(); 
+                } else {
+                    isPaused = true;
+                    setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi...", "#facc15");
+                }
             }
         }
     };
