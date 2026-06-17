@@ -62,6 +62,7 @@ let roomId = null;
 let isSender = false;
 let peerConnection = null;
 let html5QrcodeScanner = null;
+let isAnswering = false; // Ngăn xử lý answer trùng lặp
 
 // Cấu hình đa luồng tối ưu chịu tải mạng cực tốt
 const numChannels = 4; 
@@ -450,21 +451,45 @@ function listenForAnswer(){
         const data = snapshot.val();
         if(!data || !data.answer) return;
         
-        if (peerConnection.signalingState === "stable" && !isPaused) return;
-        if (peerConnection.signalingState !== "have-local-offer") return;
+        // Kiểm tra peerConnection tồn tại
+        if (!peerConnection) {
+            addLog("⚠️ PeerConnection chưa được khởi tạo, bỏ qua answer");
+            return;
+        }
+        
+        // Tránh xử lý nhiều lần
+        if (isAnswering) {
+            addLog("⚠️ Đang xử lý answer, bỏ qua...");
+            return;
+        }
+        
+        const signalingState = peerConnection.signalingState;
+        addLog(`📡 Trạng thái signaling hiện tại: ${signalingState}`);
+        
+        // CHỈ xử lý answer nếu đang ở trạng thái have-local-offer
+        if (signalingState !== "have-local-offer") {
+            addLog(`⚠️ Bỏ qua answer vì trạng thái không phải have-local-offer (hiện tại: ${signalingState})`);
+            return;
+        }
 
+        isAnswering = true;
         try {
             startConnectionTimeout();
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            addLog("Đã đồng bộ thành công kênh phản hồi (Answer WebRTC)");
-        } catch (err) { console.error(err); }
+            addLog("✅ Đã đồng bộ thành công kênh phản hồi (Answer WebRTC)");
+        } catch (err) { 
+            console.error("Lỗi setRemoteDescription:", err);
+            addLog(`❌ Lỗi setRemoteDescription: ${err.message}`);
+        } finally {
+            isAnswering = false;
+        }
     });
 
     onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
         snapshot.forEach(async(child)=>{
             const candidate = child.val();
             try{
-                if (peerConnection.remoteDescription) {
+                if (peerConnection && peerConnection.remoteDescription) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
             }catch(err){ console.error(err); }
@@ -643,17 +668,31 @@ async function joinAsReceiver(){
         return;
     }
 
+    // Hủy listener cũ nếu có
+    if (unsubscribeAnswer) {
+        unsubscribeAnswer();
+        unsubscribeAnswer = null;
+    }
+
     peerConnection = new RTCPeerConnection(rtcConfig);
     bindReceiverEvents();
 
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
 
-    await update(ref(db, `rooms/${roomId}`), {
-        answer: { type: answer.type, sdp: answer.sdp },
-        status: "connected"
-    });
+        await update(ref(db, `rooms/${roomId}`), {
+            answer: { type: answer.type, sdp: answer.sdp },
+            status: "connected"
+        });
+        addLog("✅ Đã gửi answer thành công");
+    } catch (err) {
+        console.error("Lỗi joinAsReceiver:", err);
+        addLog(`❌ Lỗi tạo answer: ${err.message}`);
+        showToast("Lỗi kết nối, thử lại!");
+        return;
+    }
 
     listenOfferCandidates();
     listenForIceRestartOffer(); 
@@ -697,7 +736,7 @@ function listenOfferCandidates(){
         snapshot.forEach(async(child)=>{
             const candidate = child.val();
             try{
-                if (peerConnection.remoteDescription) {
+                if (peerConnection && peerConnection.remoteDescription) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
                 }
             }catch(err){ console.error(err); }
@@ -713,25 +752,41 @@ function listenForIceRestartOffer() {
         const data = snapshot.val();
         if (!data || !data.offer) return;
 
-        if (peerConnection.remoteDescription && data.offer.sdp !== peerConnection.remoteDescription.sdp) {
-            if (peerConnection.signalingState === "stable" && !isPaused) return;
+        if (!peerConnection) return;
+        
+        const currentOfferSdp = peerConnection.localDescription?.sdp;
+        // Chỉ xử lý khi offer mới khác với offer hiện tại
+        if (currentOfferSdp && data.offer.sdp === currentOfferSdp) {
+            return;
+        }
 
-            addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
-            isPaused = true;
-            setStatus("Đang kết nối lại...", "#facc15");
+        // Kiểm tra trạng thái hợp lệ để set remote description
+        const signalingState = peerConnection.signalingState;
+        addLog(`📡 Trạng thái signaling khi ICE Restart: ${signalingState}`);
+        
+        if (signalingState === "stable" && !isPaused) {
+            addLog(`Phát hiện offer mới từ máy gửi, trạng thái: ${signalingState}`);
+        } else if (signalingState !== "have-local-offer" && signalingState !== "stable") {
+            addLog(`⚠️ Bỏ qua offer vì trạng thái không phù hợp: ${signalingState}`);
+            return;
+        }
 
-            try {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
+        addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
+        isPaused = true;
+        setStatus("Đang kết nối lại...", "#facc15");
 
-                await update(ref(db, `rooms/${roomId}`), {
-                    answer: { type: answer.type, sdp: answer.sdp }
-                });
-                addLog("Đã trả về cấu hình xác nhận mạng mới thành công.");
-            } catch (err) {
-                console.error("Lỗi đồng bộ cấu hình ICE Restart phía nhận:", err);
-            }
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            await update(ref(db, `rooms/${roomId}`), {
+                answer: { type: answer.type, sdp: answer.sdp }
+            });
+            addLog("Đã trả về cấu hình xác nhận mạng mới thành công.");
+        } catch (err) {
+            console.error("Lỗi đồng bộ cấu hình ICE Restart phía nhận:", err);
+            addLog(`❌ Lỗi ICE Restart: ${err.message}`);
         }
     });
 }
