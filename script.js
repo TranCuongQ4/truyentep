@@ -129,29 +129,9 @@ async function getTurnixIceConfig() {
         const data = await response.json();
         addLog("✅ Đã lấy cấu hình TURN thành công!");
         
+        // 🆕 Dùng trực tiếp iceServers từ API (đã có server Singapore)
         const config = {
-            iceServers: [
-                // STUN servers
-                {
-                    urls: [
-                        "stun:stun.l.google.com:19302",
-                        "stun:stun1.l.google.com:19302",
-                        "stun:stun2.l.google.com:19302",
-                        "stun:stun.turnix.io:3478"
-                    ]
-                },
-                // TURN servers từ Turnix.io
-                {
-                    urls: [
-                        "turn:turn.turnix.io:3478?transport=udp",
-                        "turn:turn.turnix.io:3478?transport=tcp",
-                        "turns:turn.turnix.io:5349?transport=tcp",
-                        "turns:turn.turnix.io:443?transport=tcp"
-                    ],
-                    username: data.username,
-                    credential: data.credential
-                }
-            ],
+            iceServers: data.iceServers,
             iceCandidatePoolSize: 10,
             iceTransportPolicy: 'all'
         };
