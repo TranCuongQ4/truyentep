@@ -391,8 +391,7 @@ async function createSenderPeer(){
 
     const channelOptions = {
         ordered: true,
-		maxRetransmits: 3,
-    maxPacketLifeTime: 3000
+		
     };
 
     for (let i = 0; i < numChannels; i++) {
