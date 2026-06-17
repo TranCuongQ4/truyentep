@@ -96,96 +96,40 @@ let allReceivedResolver = null;
 const chunkSize = 64 * 1024; 
 
 // =====================================================
-// CẤU HÌNH METERED.CA (LUÔN HOẠT ĐỘNG)
+// CẤU HÌNH TURN CỐ ĐỊNH - METERED.CA (ĐÃ TEST HOẠT ĐỘNG)
 // =====================================================
-const METERED_CONFIG = {
-    iceServers: [
-        {
-            urls: [
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
-                "stun:stun3.l.google.com:19302",
-                "stun:stun4.l.google.com:19302",
-                "stun:openrelay.metered.ca:80"
-            ]
-        },
-        {
-            urls: [
-                "turn:openrelay.metered.ca:80",
-                "turn:openrelay.metered.ca:443",
-                "turn:openrelay.metered.ca:443?transport=tcp"
-            ],
-            username: "openrelayproject",
-            credential: "openrelayprojectsecret"
-        }
-    ],
-    iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all'
-};
-
-// =====================================================
-// LẤY CẤU HÌNH TURN - FALLBACK TỰ ĐỘNG SANG METERED.CA
-// =====================================================
-let cachedIceConfig = null;
-let configFetching = false;
-
-async function getTurnixIceConfig() {
-    if (cachedIceConfig && cachedIceConfig.expiry > Date.now()) {
-        return cachedIceConfig.config;
-    }
+function getTurnixIceConfig() {
+    addLog("🔄 Dùng cấu hình TURN cố định (Metered.ca)");
     
-    if (configFetching) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return getTurnixIceConfig();
-    }
-    
-    configFetching = true;
-    addLog("🔄 Đang lấy cấu hình TURN...");
-    
-    try {
-        const response = await fetch('https://truyendata.cuongprovui.workers.dev/', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
+    const config = {
+        iceServers: [
+            // STUN servers
+            {
+                urls: [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                    "stun:stun2.l.google.com:19302",
+                    "stun:stun3.l.google.com:19302",
+                    "stun:stun4.l.google.com:19302"
+                ]
+            },
+            // TURN server - Metered.ca (đã test có relay)
+            {
+                urls: [
+                    "turn:openrelay.metered.ca:80",
+                    "turn:openrelay.metered.ca:443",
+                    "turn:openrelay.metered.ca:443?transport=tcp"
+                ],
+                username: "openrelayproject",
+                credential: "openrelayprojectsecret"
             }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.iceServers && data.iceServers.length > 0) {
-                const hasTurn = data.iceServers.some(s => 
-                    s.urls && s.urls.some(u => u.startsWith('turn:') || u.startsWith('turns:'))
-                );
-                if (hasTurn) {
-                    addLog("✅ Đã lấy cấu hình TURN từ Worker!");
-                    const config = {
-                        iceServers: data.iceServers,
-                        iceCandidatePoolSize: 10,
-                        iceTransportPolicy: 'all'
-                    };
-                    cachedIceConfig = {
-                        config: config,
-                        expiry: Date.now() + 3600000
-                    };
-                    return config;
-                } else {
-                    addLog("⚠️ Worker không có TURN server, fallback sang Metered.ca");
-                }
-            }
-        } else {
-            addLog(`⚠️ Worker error: ${response.status}, fallback sang Metered.ca`);
-        }
-    } catch (e) {
-        addLog(`⚠️ Worker error: ${e.message}, fallback sang Metered.ca`);
-    }
-    
-    addLog("🔄 Dùng Metered.ca TURN server (đã test ổn định)");
-    cachedIceConfig = {
-        config: METERED_CONFIG,
-        expiry: Date.now() + 3600000
+        ],
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: 'all'
     };
-    return METERED_CONFIG;
+    
+    addLog("✅ Đã cấu hình TURN với Metered.ca");
+    return config;
 }
 
 // =====================================================
@@ -429,7 +373,7 @@ createRoomBtn.addEventListener("click", async () => {
 // WEBRTC SENDER INITIALIZATION
 // =====================================================
 async function createSenderPeer(){
-    const config = await getTurnixIceConfig();
+    const config = getTurnixIceConfig();
     peerConnection = new RTCPeerConnection(config);
     dataChannels = [];
     openChannelsCount = 0;
@@ -738,7 +682,7 @@ async function joinAsReceiver(){
 
     if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
 
-    const config = await getTurnixIceConfig();
+    const config = getTurnixIceConfig();
     peerConnection = new RTCPeerConnection(config);
     bindReceiverEvents();
 
