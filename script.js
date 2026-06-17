@@ -114,7 +114,6 @@ async function getTurnixIceConfig() {
     addLog("🔄 Đang lấy cấu hình TURN từ Worker...");
     
     try {
-        // Gọi Worker của bạn
         const response = await fetch('https://truyendata.cuongprovui.workers.dev/', {
             method: 'GET',
             headers: {
@@ -129,7 +128,6 @@ async function getTurnixIceConfig() {
         const data = await response.json();
         addLog("✅ Đã lấy cấu hình TURN thành công!");
         
-        // 🆕 Dùng trực tiếp iceServers từ API (đã có server Singapore)
         const config = {
             iceServers: data.iceServers,
             iceCandidatePoolSize: 10,
@@ -404,7 +402,6 @@ createRoomBtn.addEventListener("click", async () => {
 // WEBRTC SENDER INITIALIZATION
 // =====================================================
 async function createSenderPeer(){
-    // Lấy cấu hình từ Turnix (hoặc cache)
     const config = await getTurnixIceConfig();
     peerConnection = new RTCPeerConnection(config);
     dataChannels = [];
@@ -421,7 +418,6 @@ async function createSenderPeer(){
         dataChannels.push(channel);
     }
 
-    // Debug ICE
     peerConnection.oniceconnectionstatechange = () => {
         const state = peerConnection.iceConnectionState;
         addLog(`🧊 ICE State: ${state}`);
@@ -638,7 +634,7 @@ async function sendCurrentFileSegments() {
         }
 
         if (currentChannel.bufferedAmount > 2 * 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 2)); 
+            await new Promise(r => setTimeout(r, 5)); 
             continue; 
         }
 
@@ -722,12 +718,10 @@ async function joinAsReceiver(){
         unsubscribeAnswer = null;
     }
 
-    // Lấy cấu hình từ Turnix (hoặc cache)
     const config = await getTurnixIceConfig();
     peerConnection = new RTCPeerConnection(config);
     bindReceiverEvents();
 
-    // Debug ICE
     peerConnection.oniceconnectionstatechange = () => {
         const state = peerConnection.iceConnectionState;
         addLog(`🧊 ICE State: ${state}`);
@@ -763,6 +757,7 @@ async function joinAsReceiver(){
 let currentFileIndex = 0;
 let isLastFileSignal = false;
 
+// Bổ sung đồng bộ sự kiện kênh nhận nhận tín hiệu tốt hơn
 function bindReceiverEvents() {
     dataChannels = [];
     peerConnection.ondatachannel = (event) => {
@@ -869,6 +864,7 @@ function handleIncomingMultiChannelData(event, activeChannel) {
                 receiveBuffers = {};
                 receivedChunksCount = 0;
                 receiveSize = 0;
+                transferStartTime = Date.now(); // Khởi tạo mốc thời gian để tính toán speed chuẩn xác
                 addLog(`Đang nhận file [${currentFileIndex + 1}]: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
             }
             return;
