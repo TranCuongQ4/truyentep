@@ -389,9 +389,10 @@ async function createSenderPeer(){
         dataChannels.push(channel);
     }
 
+    // Debug ICE states
     peerConnection.oniceconnectionstatechange = () => {
         const state = peerConnection.iceConnectionState;
-        addLog(`🧊 ICE State: ${state}`);
+        addLog(`🧊 ICE Connection State: ${state}`);
         if (state === 'failed') {
             addLog('❌ ICE failed - Kiểm tra TURN server!');
         }
@@ -400,16 +401,33 @@ async function createSenderPeer(){
         }
     };
 
+    peerConnection.onicegatheringstatechange = () => {
+        const state = peerConnection.iceGatheringState;
+        addLog(`🧊 ICE Gathering State: ${state}`);
+        if (state === 'complete') {
+            addLog('📡 Đã thu thập xong ICE candidates');
+        }
+    };
+
+    // Gửi ICE candidates lên Firebase
     peerConnection.onicecandidate = async (event) => {
-        if(!event.candidate) return;
+        if(!event.candidate) {
+            addLog('📡 ICE gathering complete');
+            return;
+        }
         try {
             const candidateRef = push(ref(db, `rooms/${roomId}/offerCandidates`));
             await set(candidateRef, event.candidate.toJSON());
-        } catch (e) { console.error(e); }
+            addLog(`📡 Gửi candidate lên Firebase: ${event.candidate.candidate?.substring(0, 50)}...`);
+        } catch (e) { 
+            console.error(e);
+            addLog(`❌ Lỗi gửi candidate: ${e.message}`);
+        }
     };
 
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
+    addLog(`📡 Đã tạo Offer, signaling state: ${peerConnection.signalingState}`);
 
     await update(ref(db, `rooms/${roomId}`), {
         offer: { type: offer.type, sdp: offer.sdp }
@@ -477,35 +495,55 @@ function listenForAnswer(){
         if (isAnswering) return;
         
         const signalingState = peerConnection.signalingState;
-        if (signalingState !== "have-local-offer") return;
+        addLog(`📡 Sender signaling state: ${signalingState}`);
+        
+        if (signalingState !== "have-local-offer") {
+            addLog(`⚠️ Bỏ qua answer vì state: ${signalingState}`);
+            return;
+        }
 
         isAnswering = true;
         try {
             startConnectionTimeout();
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
             addLog("✅ Đã đồng bộ Answer WebRTC");
+            addLog(`📡 ICE Gathering State: ${peerConnection.iceGatheringState}`);
+            addLog(`📡 ICE Connection State: ${peerConnection.iceConnectionState}`);
         } catch (err) { 
             console.error("Lỗi setRemoteDescription:", err);
+            addLog(`❌ Lỗi setRemoteDescription: ${err.message}`);
         } finally {
             isAnswering = false;
         }
     });
 
     unsubscribeReceiverCandidates = onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
-        if (!peerConnection || !peerConnection.remoteDescription) return;
+        if (!peerConnection || !peerConnection.remoteDescription) {
+            addLog(`⚠️ Chưa có remoteDescription, bỏ qua candidate`);
+            return;
+        }
         
-        snapshot.forEach(async(child)=>{
+        const candidates = [];
+        snapshot.forEach((child) => {
+            candidates.push(child.val());
+        });
+        
+        if (candidates.length === 0) return;
+        addLog(`📡 Nhận ${candidates.length} candidates từ máy nhận`);
+        
+        for (const candidate of candidates) {
             try {
-                const candidate = child.val();
                 if (candidate) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    addLog(`✅ Đã add candidate: ${candidate.candidate?.substring(0, 50)}...`);
                 }
             } catch(err){ 
                 if (err.name !== 'OperationError') {
                     console.error("Lỗi add ICE candidate:", err);
+                    addLog(`❌ Lỗi add candidate: ${err.message}`);
                 }
             }
-        });
+        }
     });
 }
 
@@ -686,9 +724,10 @@ async function joinAsReceiver(){
     peerConnection = new RTCPeerConnection(config);
     bindReceiverEvents();
 
+    // Debug ICE states
     peerConnection.oniceconnectionstatechange = () => {
         const state = peerConnection.iceConnectionState;
-        addLog(`🧊 ICE State: ${state}`);
+        addLog(`🧊 ICE Connection State: ${state}`);
         if (state === 'failed') {
             addLog('❌ ICE failed - Kiểm tra TURN server!');
         }
@@ -697,10 +736,34 @@ async function joinAsReceiver(){
         }
     };
 
+    peerConnection.onicegatheringstatechange = () => {
+        const state = peerConnection.iceGatheringState;
+        addLog(`🧊 ICE Gathering State: ${state}`);
+    };
+
+    // Gửi ICE candidates lên Firebase
+    peerConnection.onicecandidate = async(event)=>{
+        if(!event.candidate) {
+            addLog('📡 ICE gathering complete (receiver)');
+            return;
+        }
+        try {
+            const candidateRef = push(ref(db, `rooms/${roomId}/answerCandidates`));
+            await set(candidateRef, event.candidate.toJSON());
+            addLog(`📡 Gửi candidate lên Firebase: ${event.candidate.candidate?.substring(0, 50)}...`);
+        } catch (e) { 
+            console.error(e);
+            addLog(`❌ Lỗi gửi candidate: ${e.message}`);
+        }
+    };
+
     try {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
+        addLog(`📡 Đã set remote description, signaling state: ${peerConnection.signalingState}`);
+        
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
+        addLog(`📡 Đã tạo Answer, signaling state: ${peerConnection.signalingState}`);
 
         await update(ref(db, `rooms/${roomId}`), {
             answer: { type: answer.type, sdp: answer.sdp },
@@ -709,6 +772,7 @@ async function joinAsReceiver(){
         addLog("✅ Đã gửi answer thành công");
     } catch (err) {
         console.error("Lỗi joinAsReceiver:", err);
+        addLog(`❌ Lỗi tạo answer: ${err.message}`);
         showToast("Lỗi kết nối, thử lại!");
         return;
     }
@@ -757,20 +821,32 @@ function listenOfferCandidates(){
     if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
     
     unsubscribeSenderCandidates = onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
-        if (!peerConnection || !peerConnection.remoteDescription) return;
+        if (!peerConnection || !peerConnection.remoteDescription) {
+            addLog(`⚠️ Chưa có remoteDescription, bỏ qua candidate`);
+            return;
+        }
         
-        snapshot.forEach(async(child)=>{
+        const candidates = [];
+        snapshot.forEach((child) => {
+            candidates.push(child.val());
+        });
+        
+        if (candidates.length === 0) return;
+        addLog(`📡 Nhận ${candidates.length} candidates từ máy gửi`);
+        
+        for (const candidate of candidates) {
             try {
-                const candidate = child.val();
                 if (candidate) {
                     await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    addLog(`✅ Đã add candidate: ${candidate.candidate?.substring(0, 50)}...`);
                 }
             } catch(err){ 
                 if (err.name !== 'OperationError') {
                     console.error("Lỗi add ICE candidate:", err);
+                    addLog(`❌ Lỗi add candidate: ${err.message}`);
                 }
             }
-        });
+        }
     });
 }
 
