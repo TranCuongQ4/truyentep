@@ -93,11 +93,35 @@ let allReceivedResolver = null;
 // Giữ kích thước khối cực đại 64KB để giữ vững băng thông truyền dữ liệu lớn
 const chunkSize = 64 * 1024; 
 
+// =====================================================
+// CẤU HÌNH WEBRTC VỚI STUN + TURN SERVER
+// =====================================================
 const rtcConfig = {
     iceServers: [
-        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302", "stun:stun4.l.google.com:19302"] }
+        // STUN servers - dùng để tìm địa chỉ IP công cộng
+        { 
+            urls: [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+                "stun:openrelay.metered.ca:80"
+            ] 
+        },
+        // TURN servers - dùng để chuyển tiếp dữ liệu khi P2P thất bại (giúp kết nối khác mạng)
+        {
+            urls: [
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp"
+            ],
+            username: "openrelayproject",
+            credential: "openrelayprojectsecret"
+        }
     ],
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all' // Ưu tiên P2P, fallback sang TURN
 };
 
 // =====================================================
@@ -386,7 +410,6 @@ function setupSenderChannelEvents(channel) {
             if (isPaused) {
                 isPaused = false;
                 setStatus("Đã kết nối lại! Đang tiếp tục truyền tải...", "#3b82f6");
-                // Đẩy tiếp phần dữ liệu còn sót lại của file hiện tại
                 sendCurrentFileSegments(); 
             } else if (!isTransferring) {
                 isTransferring = true;
@@ -459,7 +482,6 @@ async function sendAllFilesSequentially() {
     });
 
     for (; currentSendingFileIdx < selectedFilesArray.length; currentSendingFileIdx++) {
-        // Nếu đang bị Pause (mất mạng) thì dừng vòng lặp tại đây để giữ đúng số Index file
         if (isPaused) {
             await new Promise(r => {
                 const interval = setInterval(() => {
@@ -478,7 +500,6 @@ async function sendAllFilesSequentially() {
             fileAckResolver = resolve;
         });
 
-        // Gửi Metadata qua luồng cố định đầu tiên
         dataChannels[0].send(JSON.stringify({
             type: "metadata",
             name: file.name,
@@ -490,7 +511,6 @@ async function sendAllFilesSequentially() {
 
         await sendCurrentFileSegments();
         
-        // Nếu trong quá trình gửi bị rớt mạng đột ngột, treo luồng tại đây chờ kết nối lại xong xuôi
         if (isPaused) {
             await new Promise(r => {
                 const interval = setInterval(() => {
@@ -509,7 +529,6 @@ async function sendAllFilesSequentially() {
         
         addLog(`Đang đợi máy nhận xử lý và ghi ổ đĩa file: ${file.name}...`);
         
-        // Treo luồng gửi tại đây, đợi máy nhận gửi tín hiệu ACK về mới chạy tiếp vòng lặp
         await fileAckPromise;
         addLog(`=> Máy nhận đã lưu xong file an toàn: ${file.name}`);
     }
