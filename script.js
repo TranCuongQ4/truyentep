@@ -96,7 +96,36 @@ let allReceivedResolver = null;
 const chunkSize = 64 * 1024; 
 
 // =====================================================
-// LẤY CẤU HÌNH TURN TỪ WORKER PROXY (TURNIX.IO)
+// CẤU HÌNH METERED.CA (LUÔN HOẠT ĐỘNG)
+// =====================================================
+const METERED_CONFIG = {
+    iceServers: [
+        {
+            urls: [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+                "stun:openrelay.metered.ca:80"
+            ]
+        },
+        {
+            urls: [
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp"
+            ],
+            username: "openrelayproject",
+            credential: "openrelayprojectsecret"
+        }
+    ],
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all'
+};
+
+// =====================================================
+// LẤY CẤU HÌNH TURN - FALLBACK TỰ ĐỘNG SANG METERED.CA
 // =====================================================
 let cachedIceConfig = null;
 let configFetching = false;
@@ -112,9 +141,10 @@ async function getTurnixIceConfig() {
     }
     
     configFetching = true;
-    addLog("🔄 Đang lấy cấu hình TURN từ Worker...");
+    addLog("🔄 Đang lấy cấu hình TURN...");
     
     try {
+        // Thử lấy từ Worker (Turnix)
         const response = await fetch('https://truyendata.cuongprovui.workers.dev/', {
             method: 'GET',
             headers: {
@@ -122,44 +152,43 @@ async function getTurnixIceConfig() {
             }
         });
         
-        if (!response.ok) {
-            throw new Error(`Worker error: ${response.status}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.iceServers && data.iceServers.length > 0) {
+                // Kiểm tra xem có TURN server không
+                const hasTurn = data.iceServers.some(s => 
+                    s.urls && s.urls.some(u => u.startsWith('turn:') || u.startsWith('turns:'))
+                );
+                if (hasTurn) {
+                    addLog("✅ Đã lấy cấu hình TURN từ Worker!");
+                    const config = {
+                        iceServers: data.iceServers,
+                        iceCandidatePoolSize: 10,
+                        iceTransportPolicy: 'all'
+                    };
+                    cachedIceConfig = {
+                        config: config,
+                        expiry: Date.now() + 3600000
+                    };
+                    return config;
+                } else {
+                    addLog("⚠️ Worker không có TURN server, fallback sang Metered.ca");
+                }
+            }
+        } else {
+            addLog(`⚠️ Worker error: ${response.status}, fallback sang Metered.ca`);
         }
-        
-        const data = await response.json();
-        addLog("✅ Đã lấy cấu hình TURN thành công!");
-        
-        const config = {
-            iceServers: data.iceServers,
-            iceCandidatePoolSize: 10,
-            iceTransportPolicy: 'all'
-        };
-        
-        cachedIceConfig = {
-            config: config,
-            expiry: Date.now() + 3600000 // 1 giờ
-        };
-        
-        return config;
-        
-    } catch (error) {
-        addLog(`❌ Lỗi lấy cấu hình: ${error.message}`);
-        addLog("⚠️ Sử dụng cấu hình dự phòng (STUN-only)");
-        return {
-            iceServers: [
-                { urls: [
-                    "stun:stun.l.google.com:19302",
-                    "stun:stun1.l.google.com:19302",
-                    "stun:stun2.l.google.com:19302",
-                    "stun:stun3.l.google.com:19302",
-                    "stun:stun4.l.google.com:19302"
-                ]}
-            ],
-            iceCandidatePoolSize: 10
-        };
-    } finally {
-        configFetching = false;
+    } catch (e) {
+        addLog(`⚠️ Worker error: ${e.message}, fallback sang Metered.ca`);
     }
+    
+    // Fallback sang Metered.ca
+    addLog("🔄 Dùng Metered.ca TURN server (đã test ổn định)");
+    cachedIceConfig = {
+        config: METERED_CONFIG,
+        expiry: Date.now() + 3600000
+    };
+    return METERED_CONFIG;
 }
 
 // =====================================================
@@ -457,7 +486,7 @@ function setupSenderChannelEvents(channel) {
         if (openChannelsCount === numChannels && isSender) {
             // Tắt lắng nghe tín hiệu trên Firebase ngay khi các kênh truyền tải vật lý đã mở hoàn toàn
             if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
-            if (unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates = null; }
+            if (unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates(); unsubscribeReceiverCandidates = null; }
             
             transferMode.textContent = `${numChannels} Kênh Gửi`;
             
@@ -758,7 +787,7 @@ function bindReceiverEvents() {
         channel.onopen = () => {
             // Khi phía Nhận đã mở cổng kết nối thành công, ngắt toàn bộ lắng nghe từ Firebase để chống lặp loop
             if (unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
-            if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates = null; }
+            if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
             
             transferMode.textContent = `Kênh Nhận`;
             setStatus("Đang nhận file...", "#3b82f6");
@@ -943,7 +972,6 @@ function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     remainingTime.textContent = formatTime(remain);
 }
 
-// 
 function updateReceiveProgress(){
     if(!expectedFileSize) return;
     const percent = Math.floor(receiveSize / expectedFileSize * 100);
