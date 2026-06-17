@@ -517,7 +517,7 @@ function listenForAnswer(){
         }
     });
 
-    unsubscribeReceiverCandidates = onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
+    unsubscribeReceiverCandidates = onValue(ref(db, `rooms/${roomId}/answerCandidates`), async (snapshot)=>{
         if (!peerConnection || !peerConnection.remoteDescription) {
             addLog(`⚠️ Chưa có remoteDescription, bỏ qua candidate`);
             return;
@@ -820,7 +820,7 @@ function bindReceiverEvents() {
 function listenOfferCandidates(){
     if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
     
-    unsubscribeSenderCandidates = onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
+    unsubscribeSenderCandidates = onValue(ref(db, `rooms/${roomId}/offerCandidates`), async (snapshot)=>{
         if (!peerConnection || !peerConnection.remoteDescription) {
             addLog(`⚠️ Chưa có remoteDescription, bỏ qua candidate`);
             return;
