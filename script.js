@@ -79,6 +79,8 @@ let expectedFileName = "";
 let transferStartTime = 0;
 let unsubscribeAnswer = null;
 let unsubscribeOffer = null;
+let unsubscribeSenderCandidates = null;
+let unsubscribeReceiverCandidates = null;
 
 // Quản lý trạng thái truyền tải
 let isTransferring = false;
@@ -100,7 +102,6 @@ let cachedIceConfig = null;
 let configFetching = false;
 
 async function getTurnixIceConfig() {
-    // Cache 1 giờ
     if (cachedIceConfig && cachedIceConfig.expiry > Date.now()) {
         return cachedIceConfig.config;
     }
@@ -454,6 +455,10 @@ function setupSenderChannelEvents(channel) {
         addLog(`Luồng [${channel.label}] đồng bộ mở`);
         
         if (openChannelsCount === numChannels && isSender) {
+            // Tắt lắng nghe tín hiệu trên Firebase ngay khi các kênh truyền tải vật lý đã mở hoàn toàn
+            if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
+            if (unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates = null; }
+            
             transferMode.textContent = `${numChannels} Kênh Gửi`;
             
             if (isPaused) {
@@ -499,38 +504,28 @@ function listenForAnswer(){
         const data = snapshot.val();
         if(!data || !data.answer) return;
         
-        if (!peerConnection) {
-            addLog("⚠️ PeerConnection chưa được khởi tạo, bỏ qua answer");
-            return;
-        }
-        
-        if (isAnswering) {
-            addLog("⚠️ Đang xử lý answer, bỏ qua...");
-            return;
-        }
+        if (!peerConnection) return;
+        if (isAnswering) return;
         
         const signalingState = peerConnection.signalingState;
-        addLog(`📡 Trạng thái signaling: ${signalingState}`);
-        
         if (signalingState !== "have-local-offer") {
-            addLog(`⚠️ Bỏ qua answer vì trạng thái không phải have-local-offer`);
-            return;
+            return; 
         }
 
         isAnswering = true;
         try {
             startConnectionTimeout();
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            await peerConnection.setRemoteDescription(new RTSessionDescription(data.answer));
             addLog("✅ Đã đồng bộ thành công Answer WebRTC");
         } catch (err) { 
             console.error("Lỗi setRemoteDescription:", err);
-            addLog(`❌ Lỗi setRemoteDescription: ${err.message}`);
         } finally {
             isAnswering = false;
         }
     });
 
-    onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
+    if (unsubscribeReceiverCandidates) unsubscribeReceiverCandidates();
+    unsubscribeReceiverCandidates = onValue(ref(db, `rooms/${roomId}/answerCandidates`), async(snapshot)=>{
         snapshot.forEach(async(child)=>{
             const candidate = child.val();
             try{
@@ -713,10 +708,7 @@ async function joinAsReceiver(){
         return;
     }
 
-    if (unsubscribeAnswer) {
-        unsubscribeAnswer();
-        unsubscribeAnswer = null;
-    }
+    if (unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
 
     const config = await getTurnixIceConfig();
     peerConnection = new RTCPeerConnection(config);
@@ -745,7 +737,6 @@ async function joinAsReceiver(){
         addLog("✅ Đã gửi answer thành công");
     } catch (err) {
         console.error("Lỗi joinAsReceiver:", err);
-        addLog(`❌ Lỗi tạo answer: ${err.message}`);
         showToast("Lỗi kết nối, thử lại!");
         return;
     }
@@ -757,7 +748,6 @@ async function joinAsReceiver(){
 let currentFileIndex = 0;
 let isLastFileSignal = false;
 
-// Bổ sung đồng bộ sự kiện kênh nhận nhận tín hiệu tốt hơn
 function bindReceiverEvents() {
     dataChannels = [];
     peerConnection.ondatachannel = (event) => {
@@ -766,6 +756,10 @@ function bindReceiverEvents() {
         dataChannels.push(channel);
         
         channel.onopen = () => {
+            // Khi phía Nhận đã mở cổng kết nối thành công, ngắt toàn bộ lắng nghe từ Firebase để chống lặp loop
+            if (unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
+            if (unsubscribeSenderCandidates) { unsubscribeSenderCandidates = null; }
+            
             transferMode.textContent = `Kênh Nhận`;
             setStatus("Đang nhận file...", "#3b82f6");
             if(isPaused) {
@@ -789,7 +783,8 @@ function bindReceiverEvents() {
 }
 
 function listenOfferCandidates(){
-    onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
+    if (unsubscribeSenderCandidates) unsubscribeSenderCandidates();
+    unsubscribeSenderCandidates = onValue(ref(db, `rooms/${roomId}/offerCandidates`), (snapshot)=>{
         snapshot.forEach(async(child)=>{
             const candidate = child.val();
             try{
@@ -808,23 +803,13 @@ function listenForIceRestartOffer() {
     unsubscribeOffer = onValue(roomRef, async (snapshot) => {
         const data = snapshot.val();
         if (!data || !data.offer) return;
-
         if (!peerConnection) return;
         
         const currentOfferSdp = peerConnection.localDescription?.sdp;
-        if (currentOfferSdp && data.offer.sdp === currentOfferSdp) {
-            return;
-        }
+        if (currentOfferSdp && data.offer.sdp === currentOfferSdp) return;
 
         const signalingState = peerConnection.signalingState;
-        addLog(`📡 Trạng thái signaling ICE Restart: ${signalingState}`);
-        
-        if (signalingState === "stable" && !isPaused) {
-            addLog(`Phát hiện offer mới từ máy gửi`);
-        } else if (signalingState !== "have-local-offer" && signalingState !== "stable") {
-            addLog(`⚠️ Bỏ qua offer vì trạng thái không phù hợp: ${signalingState}`);
-            return;
-        }
+        if (signalingState !== "have-local-offer" && signalingState !== "stable") return;
 
         addLog("Phát hiện máy gửi đang ICE Restart...");
         isPaused = true;
@@ -841,7 +826,6 @@ function listenForIceRestartOffer() {
             addLog("Đã trả về cấu hình mới thành công.");
         } catch (err) {
             console.error("Lỗi ICE Restart phía nhận:", err);
-            addLog(`❌ Lỗi ICE Restart: ${err.message}`);
         }
     });
 }
@@ -864,7 +848,7 @@ function handleIncomingMultiChannelData(event, activeChannel) {
                 receiveBuffers = {};
                 receivedChunksCount = 0;
                 receiveSize = 0;
-                transferStartTime = Date.now(); // Khởi tạo mốc thời gian để tính toán speed chuẩn xác
+                transferStartTime = Date.now(); 
                 addLog(`Đang nhận file [${currentFileIndex + 1}]: ${expectedFileName} (${formatSize(expectedFileSize)})...`);
             }
             return;
@@ -959,6 +943,7 @@ function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     remainingTime.textContent = formatTime(remain);
 }
 
+// 
 function updateReceiveProgress(){
     if(!expectedFileSize) return;
     const percent = Math.floor(receiveSize / expectedFileSize * 100);
@@ -994,7 +979,7 @@ function formatTime(sec){
 
 function watchConnectionState(){
     if (!peerConnection) return;
-    peerConnection.onconnectionstatechange = ()=>{
+    peerConnection.onconnectionstatechange = () => {
         const state = peerConnection.connectionState;
         addLog(`Trạng thái kênh: ${state.toUpperCase()}`);
         
@@ -1065,6 +1050,8 @@ function resetTransfer(){
     
     if(unsubscribeAnswer) { unsubscribeAnswer(); unsubscribeAnswer = null; }
     if(unsubscribeOffer) { unsubscribeOffer(); unsubscribeOffer = null; }
+    if(unsubscribeSenderCandidates) { unsubscribeSenderCandidates(); unsubscribeSenderCandidates = null; }
+    if(unsubscribeReceiverCandidates) { unsubscribeReceiverCandidates(); unsubscribeReceiverCandidates = null; }
 }
 
 window.addEventListener("beforeunload", async()=>{ try{ await cleanupRoom(); }catch(e){} });
