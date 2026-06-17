@@ -62,14 +62,14 @@ let roomId = null;
 let isSender = false;
 let peerConnection = null;
 let html5QrcodeScanner = null;
-let isAnswering = false; // Ngăn xử lý answer trùng lặp
+let isAnswering = false;
 
-// Cấu hình đa luồng tối ưu chịu tải mạng cực tốt
+// Cấu hình đa luồng
 const numChannels = 4; 
 let dataChannels = [];
 let openChannelsCount = 0;
 
-// Bộ đệm gom mảnh dữ liệu nhị phân nhận về từ xa cho từng file lẻ
+// Bộ đệm nhận dữ liệu
 let receiveBuffers = {}; 
 let receivedChunksCount = 0;
 let totalExpectedChunks = 0;
@@ -80,53 +80,111 @@ let transferStartTime = 0;
 let unsubscribeAnswer = null;
 let unsubscribeOffer = null;
 
-// Quản lý trạng thái truyền tải khi mất kết nối mạng đột ngột
+// Quản lý trạng thái truyền tải
 let isTransferring = false;
 let isPaused = false;
 let currentSendingFileIdx = 0;
 let currentSendingOffset = 0;
 let currentSendingChunkIndex = 0;
 
-// Biến điều hướng đồng bộ hóa phản hồi (Handshake ACK)
+// Biến điều hướng đồng bộ
 let fileAckResolver = null; 
 let allReceivedResolver = null;
 
-// Giữ kích thước khối cực đại 64KB để giữ vững băng thông truyền dữ liệu lớn
 const chunkSize = 64 * 1024; 
 
 // =====================================================
-// CẤU HÌNH WEBRTC VỚI STUN + TURN SERVER
+// LẤY CẤU HÌNH TURN TỪ WORKER PROXY (TURNIX.IO)
 // =====================================================
-const rtcConfig = {
-    iceServers: [
-        // STUN servers - dùng để tìm địa chỉ IP công cộng
-        { 
-            urls: [
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
-                "stun:stun3.l.google.com:19302",
-                "stun:stun4.l.google.com:19302",
-                "stun:openrelay.metered.ca:80"
-            ] 
-        },
-        // TURN servers - dùng để chuyển tiếp dữ liệu khi P2P thất bại (giúp kết nối khác mạng)
-        {
-            urls: [
-                "turn:openrelay.metered.ca:80",
-                "turn:openrelay.metered.ca:443",
-                "turn:openrelay.metered.ca:443?transport=tcp"
-            ],
-            username: "openrelayproject",
-            credential: "openrelayprojectsecret"
+let cachedIceConfig = null;
+let configFetching = false;
+
+async function getTurnixIceConfig() {
+    // Cache 1 giờ
+    if (cachedIceConfig && cachedIceConfig.expiry > Date.now()) {
+        return cachedIceConfig.config;
+    }
+    
+    if (configFetching) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return getTurnixIceConfig();
+    }
+    
+    configFetching = true;
+    addLog("🔄 Đang lấy cấu hình TURN từ Worker...");
+    
+    try {
+        // Gọi Worker của bạn
+        const response = await fetch('https://truyendata.cuongprovui.workers.dev/', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Worker error: ${response.status}`);
         }
-    ],
-    iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all' // Ưu tiên P2P, fallback sang TURN
-};
+        
+        const data = await response.json();
+        addLog("✅ Đã lấy cấu hình TURN thành công!");
+        
+        const config = {
+            iceServers: [
+                // STUN servers
+                {
+                    urls: [
+                        "stun:stun.l.google.com:19302",
+                        "stun:stun1.l.google.com:19302",
+                        "stun:stun2.l.google.com:19302",
+                        "stun:stun.turnix.io:3478"
+                    ]
+                },
+                // TURN servers từ Turnix.io
+                {
+                    urls: [
+                        "turn:turn.turnix.io:3478?transport=udp",
+                        "turn:turn.turnix.io:3478?transport=tcp",
+                        "turns:turn.turnix.io:5349?transport=tcp",
+                        "turns:turn.turnix.io:443?transport=tcp"
+                    ],
+                    username: data.username,
+                    credential: data.credential
+                }
+            ],
+            iceCandidatePoolSize: 10,
+            iceTransportPolicy: 'all'
+        };
+        
+        cachedIceConfig = {
+            config: config,
+            expiry: Date.now() + 3600000 // 1 giờ
+        };
+        
+        return config;
+        
+    } catch (error) {
+        addLog(`❌ Lỗi lấy cấu hình: ${error.message}`);
+        addLog("⚠️ Sử dụng cấu hình dự phòng (STUN-only)");
+        return {
+            iceServers: [
+                { urls: [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                    "stun:stun2.l.google.com:19302",
+                    "stun:stun3.l.google.com:19302",
+                    "stun:stun4.l.google.com:19302"
+                ]}
+            ],
+            iceCandidatePoolSize: 10
+        };
+    } finally {
+        configFetching = false;
+    }
+}
 
 // =====================================================
-// TỰ ĐỘNG KHỞI TẠO BẢNG THÔNG BÁO XANH NGỌC (DYNAMIC MODAL CSS/HTML)
+// TỰ ĐỘNG KHỞI TẠO BẢNG THÔNG BÁO XANH NGỌC
 // =====================================================
 const styleEl = document.createElement("style");
 styleEl.textContent = `
@@ -339,7 +397,7 @@ fileInput.addEventListener("change", () => {
 });
 
 // =====================================================
-// SENDER: CREATE ROOM (NO ZIP COMPRESSION)
+// SENDER: CREATE ROOM
 // =====================================================
 createRoomBtn.addEventListener("click", async () => {
     if(selectedFilesArray.length === 0){
@@ -366,7 +424,9 @@ createRoomBtn.addEventListener("click", async () => {
 // WEBRTC SENDER INITIALIZATION
 // =====================================================
 async function createSenderPeer(){
-    peerConnection = new RTCPeerConnection(rtcConfig);
+    // Lấy cấu hình từ Turnix (hoặc cache)
+    const config = await getTurnixIceConfig();
+    peerConnection = new RTCPeerConnection(config);
     dataChannels = [];
     openChannelsCount = 0;
 
@@ -380,6 +440,18 @@ async function createSenderPeer(){
         setupSenderChannelEvents(channel);
         dataChannels.push(channel);
     }
+
+    // Debug ICE
+    peerConnection.oniceconnectionstatechange = () => {
+        const state = peerConnection.iceConnectionState;
+        addLog(`🧊 ICE State: ${state}`);
+        if (state === 'failed') {
+            addLog('❌ ICE failed - Kiểm tra TURN server!');
+        }
+        if (state === 'connected' || state === 'completed') {
+            addLog('✅ ICE kết nối thành công!');
+        }
+    };
 
     peerConnection.onicecandidate = async (event) => {
         if(!event.candidate) return;
@@ -396,14 +468,14 @@ async function createSenderPeer(){
         offer: { type: offer.type, sdp: offer.sdp }
     });
 
-    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP song parallel [HIGH STABLE MODE]`);
+    addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP [HIGH STABLE MODE]`);
     listenForAnswer();
 }
 
 function setupSenderChannelEvents(channel) {
     channel.onopen = () => {
         openChannelsCount++;
-        addLog(`Luồng dữ liệu sổ [${channel.label}] đồng bộ mở`);
+        addLog(`Luồng [${channel.label}] đồng bộ mở`);
         
         if (openChannelsCount === numChannels && isSender) {
             transferMode.textContent = `${numChannels} Kênh Gửi`;
@@ -451,24 +523,21 @@ function listenForAnswer(){
         const data = snapshot.val();
         if(!data || !data.answer) return;
         
-        // Kiểm tra peerConnection tồn tại
         if (!peerConnection) {
             addLog("⚠️ PeerConnection chưa được khởi tạo, bỏ qua answer");
             return;
         }
         
-        // Tránh xử lý nhiều lần
         if (isAnswering) {
             addLog("⚠️ Đang xử lý answer, bỏ qua...");
             return;
         }
         
         const signalingState = peerConnection.signalingState;
-        addLog(`📡 Trạng thái signaling hiện tại: ${signalingState}`);
+        addLog(`📡 Trạng thái signaling: ${signalingState}`);
         
-        // CHỈ xử lý answer nếu đang ở trạng thái have-local-offer
         if (signalingState !== "have-local-offer") {
-            addLog(`⚠️ Bỏ qua answer vì trạng thái không phải have-local-offer (hiện tại: ${signalingState})`);
+            addLog(`⚠️ Bỏ qua answer vì trạng thái không phải have-local-offer`);
             return;
         }
 
@@ -476,7 +545,7 @@ function listenForAnswer(){
         try {
             startConnectionTimeout();
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            addLog("✅ Đã đồng bộ thành công kênh phản hồi (Answer WebRTC)");
+            addLog("✅ Đã đồng bộ thành công Answer WebRTC");
         } catch (err) { 
             console.error("Lỗi setRemoteDescription:", err);
             addLog(`❌ Lỗi setRemoteDescription: ${err.message}`);
@@ -497,10 +566,12 @@ function listenForAnswer(){
     });
 }
 
-// Hàm quản lý vòng lặp gửi tuần tự từng file một
+// =====================================================
+// SEND FILES SEQUENTIALLY
+// =====================================================
 async function sendAllFilesSequentially() {
     transferStartTime = Date.now();
-    addLog(`Bắt đầu truyền tải tuần tự - Kiểm soát bắt tay ACK từng file...`);
+    addLog(`Bắt đầu truyền tải tuần tự...`);
 
     const allReceivedPromise = new Promise((resolve) => {
         allReceivedResolver = resolve;
@@ -519,7 +590,7 @@ async function sendAllFilesSequentially() {
         currentSendingChunkIndex = 0;
         
         const file = selectedFilesArray[currentSendingFileIdx];
-        addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Bắt đầu truyền file: ${file.name} (${formatSize(file.size)})`);
+        addLog(`[${currentSendingFileIdx + 1}/${selectedFilesArray.length}] Truyền file: ${file.name} (${formatSize(file.size)})`);
         
         const fileAckPromise = new Promise((resolve) => {
             fileAckResolver = resolve;
@@ -552,13 +623,13 @@ async function sendAllFilesSequentially() {
             }
         });
         
-        addLog(`Đang đợi máy nhận xử lý và ghi ổ đĩa file: ${file.name}...`);
+        addLog(`Đợi máy nhận xác nhận file: ${file.name}...`);
         
         await fileAckPromise;
-        addLog(`=> Máy nhận đã lưu xong file an toàn: ${file.name}`);
+        addLog(`=> Đã xác nhận file: ${file.name}`);
     }
 
-    addLog("Đã truyền xong toàn bộ danh sách file gốc! Chờ xác nhận an toàn từ bên nhận để đóng Firebase...");
+    addLog("Đã truyền xong toàn bộ file!");
     
     await allReceivedPromise;
 
@@ -572,7 +643,6 @@ async function sendAllFilesSequentially() {
     });
 }
 
-// Hàm đẩy các mảnh dữ liệu nhị phân
 async function sendCurrentFileSegments() {
     const file = selectedFilesArray[currentSendingFileIdx];
     if (!file) return;
@@ -612,13 +682,12 @@ async function sendCurrentFileSegments() {
     }
 }
 
-// Hàm kích hoạt ICE Restart phía máy Gửi khi phát hiện mất kết nối mạng
 async function initiateIceRestart() {
     if (!isSender || !peerConnection || isPaused) return;
     
     isPaused = true;
     openChannelsCount = 0;
-    setStatus("Đường truyền gián đoạn! Đang tìm cách kết nối lại...", "#facc15");
+    setStatus("Đường truyền gián đoạn! Đang kết nối lại...", "#facc15");
     
     try {
         const offer = await peerConnection.createOffer({ iceRestart: true });
@@ -627,14 +696,14 @@ async function initiateIceRestart() {
         await update(ref(db, `rooms/${roomId}`), {
             offer: { type: offer.type, sdp: offer.sdp }
         });
-        addLog("Đã phát đi tín hiệu ICE Restart lên tổng đài Firebase.");
+        addLog("Đã phát tín hiệu ICE Restart");
     } catch (err) {
-        console.error("Lỗi khởi tạo cấu hình tái lập mạng:", err);
+        console.error("Lỗi ICE Restart:", err);
     }
 }
 
 // =====================================================
-// RECEIVER: JOIN ROOM & CONNECTION SETUP
+// RECEIVER: JOIN ROOM
 // =====================================================
 joinRoomBtn.addEventListener("click", async()=>{
     const code = roomInput.value.trim().toUpperCase();
@@ -668,14 +737,27 @@ async function joinAsReceiver(){
         return;
     }
 
-    // Hủy listener cũ nếu có
     if (unsubscribeAnswer) {
         unsubscribeAnswer();
         unsubscribeAnswer = null;
     }
 
-    peerConnection = new RTCPeerConnection(rtcConfig);
+    // Lấy cấu hình từ Turnix (hoặc cache)
+    const config = await getTurnixIceConfig();
+    peerConnection = new RTCPeerConnection(config);
     bindReceiverEvents();
+
+    // Debug ICE
+    peerConnection.oniceconnectionstatechange = () => {
+        const state = peerConnection.iceConnectionState;
+        addLog(`🧊 ICE State: ${state}`);
+        if (state === 'failed') {
+            addLog('❌ ICE failed - Kiểm tra TURN server!');
+        }
+        if (state === 'connected' || state === 'completed') {
+            addLog('✅ ICE kết nối thành công!');
+        }
+    };
 
     try {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(roomData.offer));
@@ -709,11 +791,11 @@ function bindReceiverEvents() {
         dataChannels.push(channel);
         
         channel.onopen = () => {
-            transferMode.textContent = `Kênh Nhận Toàn Phần`;
+            transferMode.textContent = `Kênh Nhận`;
             setStatus("Đang nhận file...", "#3b82f6");
             if(isPaused) {
                 isPaused = false;
-                addLog("Đã thiết lập lại luồng nhận dữ liệu kế thừa thành công!");
+                addLog("Đã thiết lập lại luồng nhận!");
             }
         };
 
@@ -755,23 +837,21 @@ function listenForIceRestartOffer() {
         if (!peerConnection) return;
         
         const currentOfferSdp = peerConnection.localDescription?.sdp;
-        // Chỉ xử lý khi offer mới khác với offer hiện tại
         if (currentOfferSdp && data.offer.sdp === currentOfferSdp) {
             return;
         }
 
-        // Kiểm tra trạng thái hợp lệ để set remote description
         const signalingState = peerConnection.signalingState;
-        addLog(`📡 Trạng thái signaling khi ICE Restart: ${signalingState}`);
+        addLog(`📡 Trạng thái signaling ICE Restart: ${signalingState}`);
         
         if (signalingState === "stable" && !isPaused) {
-            addLog(`Phát hiện offer mới từ máy gửi, trạng thái: ${signalingState}`);
+            addLog(`Phát hiện offer mới từ máy gửi`);
         } else if (signalingState !== "have-local-offer" && signalingState !== "stable") {
             addLog(`⚠️ Bỏ qua offer vì trạng thái không phù hợp: ${signalingState}`);
             return;
         }
 
-        addLog("Phát hiện máy gửi đang thiết lập lại luồng mạng (ICE Restart)...");
+        addLog("Phát hiện máy gửi đang ICE Restart...");
         isPaused = true;
         setStatus("Đang kết nối lại...", "#facc15");
 
@@ -783,16 +863,16 @@ function listenForIceRestartOffer() {
             await update(ref(db, `rooms/${roomId}`), {
                 answer: { type: answer.type, sdp: answer.sdp }
             });
-            addLog("Đã trả về cấu hình xác nhận mạng mới thành công.");
+            addLog("Đã trả về cấu hình mới thành công.");
         } catch (err) {
-            console.error("Lỗi đồng bộ cấu hình ICE Restart phía nhận:", err);
+            console.error("Lỗi ICE Restart phía nhận:", err);
             addLog(`❌ Lỗi ICE Restart: ${err.message}`);
         }
     });
 }
 
 // =====================================================
-// RECEIVER: STREAM RECEIVE & AUTO DOWNLOAD ORIGINALS
+// RECEIVER: HANDLE INCOMING DATA
 // =====================================================
 function handleIncomingMultiChannelData(event, activeChannel) {
     if (typeof event.data === "string") {
@@ -837,7 +917,7 @@ function handleIncomingMultiChannelData(event, activeChannel) {
 function saveReceivedFileDirectly(activeChannel) {
     if (receivedChunksCount === 0 || receivedChunksCount < totalExpectedChunks) return;
     
-    addLog(`Đang tiến hành ghi dữ liệu xuống thiết bị: ${expectedFileName}`);
+    addLog(`Đang ghi dữ liệu xuống thiết bị: ${expectedFileName}`);
     
     const sortedBuffers = [];
     for (let i = 0; i < totalExpectedChunks; i++) {
@@ -858,7 +938,7 @@ function saveReceivedFileDirectly(activeChannel) {
     document.body.removeChild(downloadAnchor);
     URL.revokeObjectURL(fileObjectURL);
     
-    addLog(`Đã nhận và lưu ổ đĩa thành công: ${expectedFileName}`);
+    addLog(`Đã lưu thành công: ${expectedFileName}`);
     showToast(`Đã lưu xong: ${expectedFileName}`);
     
     receiveBuffers = {};
@@ -871,7 +951,7 @@ function saveReceivedFileDirectly(activeChannel) {
         activeChannel.send(JSON.stringify({ type: "file_ack", index: currentFileIndex }));
         
         if (isLastFileSignal) {
-            addLog("Đã nhận đủ toàn bộ danh sách file! Phát tín hiệu kết thúc an toàn đến máy gửi...");
+            addLog("Đã nhận đủ toàn bộ file! Phát tín hiệu kết thúc...");
             setTimeout(() => {
                 if (activeChannel.readyState === "open") {
                     activeChannel.send(JSON.stringify({ type: "all_files_received" }));
@@ -886,7 +966,7 @@ function saveReceivedFileDirectly(activeChannel) {
 }
 
 // =====================================================
-// PROGRESS CALCULATION HELPERS
+// PROGRESS HELPERS
 // =====================================================
 function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     const percent = Math.floor(sent / total * 100);
@@ -903,9 +983,6 @@ function updateSendProgress(sent, total, currentName, fileIdx, totalFiles){
     remainingTime.textContent = formatTime(remain);
 }
 
-// =====================================================
-// RECEIVE PROGRESS HELPERS
-// =====================================================
 function updateReceiveProgress(){
     if(!expectedFileSize) return;
     const percent = Math.floor(receiveSize / expectedFileSize * 100);
@@ -952,7 +1029,7 @@ function watchConnectionState(){
                 initiateIceRestart(); 
             } else {
                 isPaused = true;
-                setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi mạng...", "#facc15");
+                setStatus("Mất tín hiệu máy gửi! Đang đợi phục hồi...", "#facc15");
             }
         }
     };
@@ -977,7 +1054,7 @@ async function cleanupRoom(){
     try{
         if(roomId){
             await remove(ref(db, `rooms/${roomId}`));
-            addLog("Đã xác nhận máy nhận an toàn. Đã giải phóng tài nguyên phòng trên Firebase");
+            addLog("Đã giải phóng tài nguyên phòng trên Firebase");
         }
     }catch(err){ console.error(err); }
 }
