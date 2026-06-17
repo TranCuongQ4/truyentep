@@ -65,7 +65,7 @@ let html5QrcodeScanner = null;
 let isAnswering = false;
 
 // Cấu hình đa luồng
-const numChannels = 4; 
+const numChannels = 8; 
 let dataChannels = [];
 let openChannelsCount = 0;
 
@@ -93,7 +93,7 @@ let currentSendingChunkIndex = 0;
 let fileAckResolver = null; 
 let allReceivedResolver = null;
 
-const chunkSize = 64 * 1024; 
+const chunkSize = 256 * 1024; 
 
 // =====================================================
 // CẤU HÌNH TURN CỐ ĐỊNH - METERED.CA (ĐÃ TEST HOẠT ĐỘNG)
@@ -390,7 +390,9 @@ async function createSenderPeer(){
     openChannelsCount = 0;
 
     const channelOptions = {
-        ordered: true
+        ordered: true,
+		maxRetransmits: 3,
+    maxPacketLifeTime: 3000
     };
 
     for (let i = 0; i < numChannels; i++) {
@@ -663,8 +665,8 @@ async function sendCurrentFileSegments() {
             continue;
         }
 
-        if (currentChannel.bufferedAmount > 2 * 1024 * 1024) {
-            await new Promise(r => setTimeout(r, 5)); 
+        if (currentChannel.bufferedAmount > 4 * 1024 * 1024) {
+            await new Promise(r => setTimeout(r, 1)); 
             continue; 
         }
 
