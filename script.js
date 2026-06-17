@@ -93,7 +93,7 @@ let currentSendingChunkIndex = 0;
 let fileAckResolver = null; 
 let allReceivedResolver = null;
 
-const chunkSize = 256 * 1024; 
+const chunkSize = 64 * 1024; 
 
 // =====================================================
 // CẤU HÌNH TURN CỐ ĐỊNH - METERED.CA (ĐÃ TEST HOẠT ĐỘNG)
