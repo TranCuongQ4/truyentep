@@ -99,7 +99,7 @@ const chunkSize = 64 * 1024;
 // CẤU HÌNH TURN CỐ ĐỊNH - METERED.CA (ĐÃ TEST HOẠT ĐỘNG)
 // =====================================================
 function getTurnixIceConfig() {
-    addLog("🔄 Dùng cấu hình TURN cố định (Metered.ca)");
+    addLog("🔄 Dùng cấu hình TURN với nhiều server dự phòng");
     
     const config = {
         iceServers: [
@@ -113,7 +113,7 @@ function getTurnixIceConfig() {
                     "stun:stun4.l.google.com:19302"
                 ]
             },
-            // TURN server - Metered.ca (đã test có relay)
+            // TURN server - Metered.ca (chính)
             {
                 urls: [
                     "turn:openrelay.metered.ca:80",
@@ -122,13 +122,24 @@ function getTurnixIceConfig() {
                 ],
                 username: "openrelayproject",
                 credential: "openrelayprojectsecret"
+            },
+            // TURN server dự phòng - Twilio (nếu Metered.ca bị chặn)
+            {
+                urls: [
+                    "turn:global.turn.twilio.com:3478?transport=udp",
+                    "turn:global.turn.twilio.com:3478?transport=tcp",
+                    "turns:global.turn.twilio.com:5349?transport=tcp"
+                ],
+                username: "anyfirewall",
+                credential: "anyfirewall"
             }
         ],
         iceCandidatePoolSize: 10,
-        iceTransportPolicy: 'all'
+        iceTransportPolicy: 'all',
+        iceServersTimeout: 10000 // Tăng timeout lên 10 giây
     };
     
-    addLog("✅ Đã cấu hình TURN với Metered.ca");
+    addLog("✅ Đã cấu hình TURN với Metered.ca + Twilio dự phòng");
     return config;
 }
 
@@ -395,6 +406,11 @@ async function createSenderPeer(){
         addLog(`🧊 ICE Connection State: ${state}`);
         if (state === 'failed') {
             addLog('❌ ICE failed - Kiểm tra TURN server!');
+            // Thử ICE Restart
+            if (isSender && !isPaused) {
+                addLog('🔄 Tự động ICE Restart...');
+                initiateIceRestart();
+            }
         }
         if (state === 'connected' || state === 'completed') {
             addLog('✅ ICE kết nối thành công!');
@@ -418,7 +434,7 @@ async function createSenderPeer(){
         try {
             const candidateRef = push(ref(db, `rooms/${roomId}/offerCandidates`));
             await set(candidateRef, event.candidate.toJSON());
-            addLog(`📡 Gửi candidate lên Firebase: ${event.candidate.candidate?.substring(0, 50)}...`);
+            addLog(`📡 Gửi candidate: ${event.candidate.candidate?.substring(0, 60)}...`);
         } catch (e) { 
             console.error(e);
             addLog(`❌ Lỗi gửi candidate: ${e.message}`);
@@ -435,6 +451,15 @@ async function createSenderPeer(){
 
     addLog(`Đã thiết lập đồng bộ hóa cấu hình đa luồng SCTP [HIGH STABLE MODE]`);
     listenForAnswer();
+    
+    // Tự động ICE Restart sau 15 giây nếu chưa kết nối
+    setTimeout(() => {
+        if (peerConnection && peerConnection.iceConnectionState !== 'connected' && 
+            peerConnection.iceConnectionState !== 'completed') {
+            addLog('⏰ Timeout 15s, tự động ICE Restart...');
+            initiateIceRestart();
+        }
+    }, 15000);
 }
 
 function setupSenderChannelEvents(channel) {
@@ -727,7 +752,7 @@ async function joinAsReceiver(){
     // Debug ICE states
     peerConnection.oniceconnectionstatechange = () => {
         const state = peerConnection.iceConnectionState;
-        addLog(`🧊 ICE Connection State: ${state}`);
+        addLog(`🧊 ICE Connection State (receiver): ${state}`);
         if (state === 'failed') {
             addLog('❌ ICE failed - Kiểm tra TURN server!');
         }
@@ -738,7 +763,10 @@ async function joinAsReceiver(){
 
     peerConnection.onicegatheringstatechange = () => {
         const state = peerConnection.iceGatheringState;
-        addLog(`🧊 ICE Gathering State: ${state}`);
+        addLog(`🧊 ICE Gathering State (receiver): ${state}`);
+        if (state === 'complete') {
+            addLog('📡 Đã thu thập xong ICE candidates (receiver)');
+        }
     };
 
     // Gửi ICE candidates lên Firebase
@@ -750,7 +778,7 @@ async function joinAsReceiver(){
         try {
             const candidateRef = push(ref(db, `rooms/${roomId}/answerCandidates`));
             await set(candidateRef, event.candidate.toJSON());
-            addLog(`📡 Gửi candidate lên Firebase: ${event.candidate.candidate?.substring(0, 50)}...`);
+            addLog(`📡 Gửi candidate (receiver): ${event.candidate.candidate?.substring(0, 60)}...`);
         } catch (e) { 
             console.error(e);
             addLog(`❌ Lỗi gửi candidate: ${e.message}`);
@@ -778,7 +806,19 @@ async function joinAsReceiver(){
     }
 
     listenOfferCandidates();
-    listenForIceRestartOffer(); 
+    listenForIceRestartOffer();
+    
+    // Tự động ICE Restart sau 15 giây nếu chưa kết nối
+    setTimeout(() => {
+        if (peerConnection && peerConnection.iceConnectionState !== 'connected' && 
+            peerConnection.iceConnectionState !== 'completed') {
+            addLog('⏰ Timeout 15s (receiver), yêu cầu ICE Restart...');
+            // Gửi tín hiệu yêu cầu restart qua Firebase
+            update(ref(db, `rooms/${roomId}`), {
+                requestRestart: true
+            });
+        }
+    }, 15000);
 }
 
 let currentFileIndex = 0;
