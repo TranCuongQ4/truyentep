@@ -515,7 +515,7 @@ function listenForAnswer(){
         isAnswering = true;
         try {
             startConnectionTimeout();
-            await peerConnection.setRemoteDescription(new RTSessionDescription(data.answer));
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
             addLog("✅ Đã đồng bộ thành công Answer WebRTC");
         } catch (err) { 
             console.error("Lỗi setRemoteDescription:", err);
